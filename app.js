@@ -14,6 +14,8 @@ const state = {
   sheetName: '我的錯題進化本_2026',
   sheetMode: 'new', // 'new' | 'existing'
   originalLoadedCount: 0,
+  excelFileHandle: null, // FileSystemFileHandle for real-time local .xlsx sync
+  linkedGoogleSheetUrl: '', // URL to user's cloud Google Sheet
   mistakes: [],
   answerKeyMap: {}, // { "1": "C", "2": "B", ... }
   selectedErrorTags: new Set(),
@@ -180,7 +182,12 @@ function initSpreadsheetModal() {
   const cardExisting = document.getElementById('cardChoiceExisting');
   const cardNew = document.getElementById('cardChoiceNew');
   const inputExistingFile = document.getElementById('inputExistingSheetFile');
+  const btnBindExistingExcel = document.getElementById('btnBindExistingExcelFile');
+  const btnLoadGoogleUrl = document.getElementById('btnLoadGoogleSheetUrl');
+  const btnCreateRealGoogle = document.getElementById('btnCreateRealGoogleSheet');
+  const btnCreateRealExcel = document.getElementById('btnCreateRealExcelFile');
   const btnConfirmNew = document.getElementById('btnConfirmNewSheet');
+  const btnOpenLinkedGoogle = document.getElementById('btnOpenLinkedGoogleSheet');
 
   const openModal = () => {
     modal.classList.remove('hidden');
@@ -188,6 +195,13 @@ function initSpreadsheetModal() {
 
   btnOpenModal.addEventListener('click', openModal);
   btnTabChangeSheet.addEventListener('click', openModal);
+
+  if (btnOpenLinkedGoogle) {
+    btnOpenLinkedGoogle.addEventListener('click', () => {
+      const targetUrl = state.linkedGoogleSheetUrl || 'https://docs.google.com/spreadsheets/';
+      window.open(targetUrl, '_blank');
+    });
+  }
 
   cardExisting.addEventListener('click', () => {
     cardExisting.classList.add('selected');
@@ -199,25 +213,153 @@ function initSpreadsheetModal() {
     cardExisting.classList.remove('selected');
   });
 
-  // Choice 1: Upload Existing Excel (.xlsx / .xls / .csv)
+  // Choice 1A: Select & Bind Existing Local Excel File (.xlsx / .csv)
+  if (btnBindExistingExcel) {
+    btnBindExistingExcel.addEventListener('click', async () => {
+      if (window.showOpenFilePicker) {
+        try {
+          const [handle] = await window.showOpenFilePicker({
+            types: [
+              {
+                description: 'Excel 或 CSV 試算表',
+                accept: {
+                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+                  'application/vnd.ms-excel': ['.xls'],
+                  'text/csv': ['.csv']
+                }
+              }
+            ],
+            multiple: false
+          });
+          state.excelFileHandle = handle;
+          const file = await handle.getFile();
+          loadExistingSpreadsheetFile(file, true);
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') return;
+        }
+      }
+      inputExistingFile.click();
+    });
+  }
+
   inputExistingFile.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    loadExistingSpreadsheetFile(file);
+    state.excelFileHandle = null;
+    loadExistingSpreadsheetFile(file, false);
     e.target.value = '';
   });
 
-  // Choice 2: Start New Spreadsheet
+  // Choice 1B: Load & Open Existing Cloud Google Sheet by URL
+  if (btnLoadGoogleUrl) {
+    btnLoadGoogleUrl.addEventListener('click', async () => {
+      const rawUrl = document.getElementById('inputExistingGoogleSheetUrl').value.trim();
+      if (!rawUrl) {
+        alert('請先貼上您的 Google 試算表網址（例如 https://docs.google.com/spreadsheets/d/...）！');
+        return;
+      }
+      await loadAndOpenExistingGoogleSheetUrl(rawUrl);
+    });
+  }
+
+  // Choice 2A: Physically Open a Brand New Google Sheet in a New Tab (https://sheets.new)
+  if (btnCreateRealGoogle) {
+    btnCreateRealGoogle.addEventListener('click', async () => {
+      const nameInput = document.getElementById('inputNewSheetName').value.trim();
+      state.sheetName = nameInput || '我的錯題進化本_2026';
+      state.sheetMode = 'new';
+      state.originalLoadedCount = 0;
+      state.excelFileHandle = null;
+      state.linkedGoogleSheetUrl = 'https://docs.google.com/spreadsheets/';
+      state.mistakes = [];
+
+      // Copy header columns to clipboard so user can immediately Ctrl+V in cell A1 of the new Google Sheet
+      const headers = [
+        '錯題ID', '建立日期', '科目', '試卷單元', '題號',
+        '題目內容', '選項A', '選項B', '選項C', '選項D',
+        '我的錯誤答案', '正確答案', '錯誤類型標籤', '為何選錯診斷',
+        '正確觀念解析', '避坑錦囊', '練習次數', '答對次數', '熟練狀態'
+      ];
+      try {
+        await navigator.clipboard.writeText(headers.join('\t'));
+      } catch (e) {}
+
+      // Open real Google Sheet creation URL in new tab
+      window.open('https://sheets.new', '_blank');
+
+      saveToLocalStorage();
+      updateAllViews();
+      modal.classList.add('hidden');
+      showToast(
+        `🟢 已在新分頁為您打開全新的 Google 試算表！並已自動複製「19 個標準欄位標題」，您可在新分頁 A1 儲存格直接按 Ctrl+V 貼上！`
+      );
+    });
+  }
+
+  // Choice 2B: Physically Create & Save a Brand New Local Excel (.xlsx) File
+  if (btnCreateRealExcel) {
+    btnCreateRealExcel.addEventListener('click', async () => {
+      const nameInput = document.getElementById('inputNewSheetName').value.trim();
+      state.sheetName = nameInput || '我的錯題進化本_2026';
+      state.sheetMode = 'new';
+      state.originalLoadedCount = 0;
+      state.linkedGoogleSheetUrl = '';
+      state.mistakes = [];
+
+      const safeName = state.sheetName.replace(/[\\/:*?"<>|]/g, '_');
+
+      if (window.showSaveFilePicker) {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: `${safeName}.xlsx`,
+            types: [
+              {
+                description: 'Excel 試算表 (.xlsx)',
+                accept: {
+                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx']
+                }
+              }
+            ]
+          });
+          state.excelFileHandle = handle;
+          await writeCurrentWorkbookToHandle(handle);
+          saveToLocalStorage();
+          updateAllViews();
+          modal.classList.add('hidden');
+          showToast(
+            `📗 已在您的電腦建立「${handle.name}」並完成綁定！現在可直接在電腦打開它，且之後每新增一筆錯題都會自動同步寫入該檔案！`
+          );
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') return;
+        }
+      }
+
+      // Fallback: Immediately download the newly created .xlsx file with headers
+      downloadBlankOrCurrentWorkbookXlsx(safeName);
+      saveToLocalStorage();
+      updateAllViews();
+      modal.classList.add('hidden');
+      showToast(
+        `📗 已建立並下載全新 Excel 試算表「${safeName}.xlsx」！您可以直接點擊打開它。`
+      );
+    });
+  }
+
+  // Choice 2C: Start New Spreadsheet in App First
   btnConfirmNew.addEventListener('click', () => {
     const nameInput = document.getElementById('inputNewSheetName').value.trim();
     state.sheetName = nameInput || '我的錯題進化本_2026';
     state.sheetMode = 'new';
     state.originalLoadedCount = 0;
+    state.excelFileHandle = null;
     state.mistakes = [];
     saveToLocalStorage();
     updateAllViews();
     modal.classList.add('hidden');
-    showToast(`✨ 已開啟新試算表：「${state.sheetName}」`);
+    switchTab('tab-sheet');
+    showToast(`✨ 已在系統內建立新試算表：「${state.sheetName}」（已為您切換至試算表預覽頁）`);
   });
 
   // Quick Export Button in Header
@@ -264,6 +406,7 @@ function saveToLocalStorage() {
       sheetName: state.sheetName,
       sheetMode: state.sheetMode,
       originalLoadedCount: state.originalLoadedCount,
+      linkedGoogleSheetUrl: state.linkedGoogleSheetUrl || '',
       mistakes: state.mistakes,
       answerKeyMap: state.answerKeyMap,
       savedAt: new Date().toISOString()
@@ -272,9 +415,68 @@ function saveToLocalStorage() {
   } catch (err) {
     console.warn('Autosave write failed (likely image quota):', err);
   }
+  // If user bound a local .xlsx file via File System Access API, auto-write changes to disk
+  if (state.excelFileHandle) {
+    writeCurrentWorkbookToHandle(state.excelFileHandle).catch((e) =>
+      console.warn('Auto-sync to bound Excel file skipped:', e)
+    );
+  }
 }
 
-function loadExistingSpreadsheetFile(file) {
+function parseJsonRowsToMistakes(jsonRows) {
+  return jsonRows
+    .map((row, idx) => {
+      const qText =
+        row['題目內容'] ||
+        row['題目敘述'] ||
+        row['題目'] ||
+        row['Question'] ||
+        '';
+      const wrongAns = String(
+        row['我的錯誤答案'] || row['錯誤答案'] || row['誤選'] || ''
+      ).trim();
+      const correctAns = String(
+        row['正確答案'] || row['正解'] || ''
+      ).trim();
+
+      if (!qText && !wrongAns && !correctAns) return null;
+
+      const tagsStr = String(row['錯誤類型標籤'] || row['錯誤類型'] || '');
+      const errorTags = tagsStr
+        ? tagsStr
+            .split(/[,，、/]/)
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : ['觀念混淆'];
+
+      return {
+        id: row['錯題ID'] || `M_${Date.now()}_${idx}`,
+        createdAt: row['建立日期'] || new Date().toLocaleDateString('zh-TW'),
+        subject: row['科目'] || '綜合科目',
+        unit: row['試卷單元'] || row['單元'] || '既有試算表匯入',
+        questionNum: String(row['題號'] || idx + 1),
+        questionText: qText,
+        optA: String(row['選項A'] || ''),
+        optB: String(row['選項B'] || ''),
+        optC: String(row['選項C'] || ''),
+        optD: String(row['選項D'] || ''),
+        wrongAnswer: wrongAns || 'B',
+        correctAnswer: correctAns || 'C',
+        errorTags,
+        whyWrong: String(row['為何選錯診斷'] || row['錯誤原因'] || ''),
+        correctConcept: String(row['正確觀念解析'] || row['正確觀念'] || ''),
+        keyTakeaway: String(row['避坑錦囊'] || row['重點提醒'] || ''),
+        practiceCount: Number(row['練習次數'] || 0),
+        correctCount: Number(row['答對次數'] || 0),
+        masteryStatus: row['熟練狀態'] || '待加強',
+        cropImageDataUrl: String(row['題目截圖資料'] || ''),
+        isHistorical: true
+      };
+    })
+    .filter(Boolean);
+}
+
+function loadExistingSpreadsheetFile(file, isBoundHandle = false) {
   const reader = new FileReader();
   reader.onload = (evt) => {
     try {
@@ -284,56 +486,7 @@ function loadExistingSpreadsheetFile(file) {
       const worksheet = workbook.Sheets[firstSheetName];
       const jsonRows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
 
-      const loadedMistakes = jsonRows
-        .map((row, idx) => {
-          const qText =
-            row['題目內容'] ||
-            row['題目敘述'] ||
-            row['題目'] ||
-            row['Question'] ||
-            '';
-          const wrongAns = String(
-            row['我的錯誤答案'] || row['錯誤答案'] || row['誤選'] || ''
-          ).trim();
-          const correctAns = String(
-            row['正確答案'] || row['正解'] || ''
-          ).trim();
-
-          if (!qText && !wrongAns && !correctAns) return null;
-
-          const tagsStr = String(row['錯誤類型標籤'] || row['錯誤類型'] || '');
-          const errorTags = tagsStr
-            ? tagsStr
-                .split(/[,，、/]/)
-                .map((s) => s.trim())
-                .filter(Boolean)
-            : ['觀念混淆'];
-
-          return {
-            id: row['錯題ID'] || `M_${Date.now()}_${idx}`,
-            createdAt: row['建立日期'] || new Date().toLocaleDateString('zh-TW'),
-            subject: row['科目'] || '綜合科目',
-            unit: row['試卷單元'] || row['單元'] || '既有試算表匯入',
-            questionNum: String(row['題號'] || idx + 1),
-            questionText: qText,
-            optA: String(row['選項A'] || ''),
-            optB: String(row['選項B'] || ''),
-            optC: String(row['選項C'] || ''),
-            optD: String(row['選項D'] || ''),
-            wrongAnswer: wrongAns || 'B',
-            correctAnswer: correctAns || 'C',
-            errorTags,
-            whyWrong: String(row['為何選錯診斷'] || row['錯誤原因'] || ''),
-            correctConcept: String(row['正確觀念解析'] || row['正確觀念'] || ''),
-            keyTakeaway: String(row['避坑錦囊'] || row['重點提醒'] || ''),
-            practiceCount: Number(row['練習次數'] || 0),
-            correctCount: Number(row['答對次數'] || 0),
-            masteryStatus: row['熟練狀態'] || '待加強',
-            cropImageDataUrl: String(row['題目截圖資料'] || ''),
-            isHistorical: true
-          };
-        })
-        .filter(Boolean);
+      const loadedMistakes = parseJsonRowsToMistakes(jsonRows);
 
       const cleanBaseName = file.name.replace(/\.(xlsx|xls|csv)$/i, '');
       state.sheetName = cleanBaseName;
@@ -344,8 +497,11 @@ function loadExistingSpreadsheetFile(file) {
       saveToLocalStorage();
       updateAllViews();
       document.getElementById('sheetInitModal').classList.add('hidden');
+      const syncMsg = isBoundHandle
+        ? '（已直接綁定原檔案，新增的錯題將自動寫入此 Excel 檔！）'
+        : '（新增錯題後可點擊匯出更新試算表）';
       showToast(
-        `📂 成功載入既有試算表「${cleanBaseName}」，共載入 ${loadedMistakes.length} 筆歷史錯題！新增的錯題將自動接續於後方。`
+        `📂 成功載入既有試算表「${cleanBaseName}」，共載入 ${loadedMistakes.length} 筆歷史錯題！${syncMsg}`
       );
     } catch (err) {
       console.error(err);
@@ -353,6 +509,110 @@ function loadExistingSpreadsheetFile(file) {
     }
   };
   reader.readAsArrayBuffer(file);
+}
+
+async function loadAndOpenExistingGoogleSheetUrl(rawUrl) {
+  const match = rawUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (!match) {
+    alert('網址格式不正確！請貼上包含 /spreadsheets/d/... 的 Google 試算表網址。');
+    return;
+  }
+  const sheetId = match[1];
+  state.linkedGoogleSheetUrl = rawUrl;
+  state.sheetName = `雲端Google試算表_${sheetId.slice(0, 6)}`;
+  state.sheetMode = 'existing';
+
+  // Physically open the user's Google Sheet in a new tab
+  window.open(rawUrl, '_blank');
+
+  // Try fetching public CSV from the Google Sheet
+  try {
+    const csvExportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+    const resp = await fetch(csvExportUrl);
+    if (resp.ok) {
+      const csvText = await resp.text();
+      const workbook = XLSX.read(csvText, { type: 'string' });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonRows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+      const loadedMistakes = parseJsonRowsToMistakes(jsonRows);
+      state.originalLoadedCount = loadedMistakes.length;
+      state.mistakes = loadedMistakes;
+      saveToLocalStorage();
+      updateAllViews();
+      document.getElementById('sheetInitModal').classList.add('hidden');
+      showToast(
+        `🟢 已在新分頁開啟您的 Google 試算表，並成功從雲端載入 ${loadedMistakes.length} 筆既有錯題！`
+      );
+      return;
+    }
+  } catch (err) {
+    console.warn('Google Sheet CSV fetch warning (may require public view permission):', err);
+  }
+
+  saveToLocalStorage();
+  updateAllViews();
+  document.getElementById('sheetInitModal').classList.add('hidden');
+  showToast(
+    '🟢 已在新分頁為您打開該份 Google 試算表！（若需自動載入雲端舊題，請將試算表共用權限設為「知道連結的任何人可檢視」）'
+  );
+}
+
+function buildWorkbookObject(includeBase64Crop = true) {
+  let rows = formatMistakesForSpreadsheetExport(includeBase64Crop);
+  if (rows.length === 0) {
+    // Provide header-only template row structure when creating a brand new empty spreadsheet
+    rows = [
+      {
+        錯題ID: '',
+        建立日期: '',
+        科目: '',
+        試卷單元: '',
+        題號: '',
+        題目內容: '',
+        選項A: '',
+        選項B: '',
+        選項C: '',
+        選項D: '',
+        我的錯誤答案: '',
+        正確答案: '',
+        錯誤類型標籤: '',
+        為何選錯診斷: '',
+        正確觀念解析: '',
+        避坑錦囊: '',
+        練習次數: '',
+        答對次數: '',
+        熟練狀態: '',
+        題目截圖資料: ''
+      }
+    ];
+  }
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  if (state.mistakes.length === 0) {
+    // Keep only row 1 (the header row) if mistakes array is empty
+    worksheet['!ref'] = 'A1:T1';
+  }
+  worksheet['!cols'] = [
+    { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 20 }, { wch: 8 },
+    { wch: 42 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 },
+    { wch: 12 }, { wch: 10 }, { wch: 22 }, { wch: 36 }, { wch: 36 },
+    { wch: 32 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 18 }
+  ];
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, '錯題紀錄總表');
+  return workbook;
+}
+
+async function writeCurrentWorkbookToHandle(handle) {
+  const workbook = buildWorkbookObject(true);
+  const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+  const writable = await handle.createWritable();
+  await writable.write(new Blob([wbout], { type: 'application/octet-stream' }));
+  await writable.close();
+}
+
+function downloadBlankOrCurrentWorkbookXlsx(safeName) {
+  const workbook = buildWorkbookObject(true);
+  XLSX.writeFile(workbook, `${safeName}.xlsx`);
 }
 
 // ============================================================================
@@ -2236,13 +2496,23 @@ function updateAllViews() {
 }
 
 function updateHeaderBadges() {
-  const modeLabel = state.sheetMode === 'existing' ? '延續舊表' : '新試算表';
+  const syncType = state.excelFileHandle
+    ? '📗 已綁定本機 Excel'
+    : state.linkedGoogleSheetUrl
+    ? '🟢 已連動 Google 試算表'
+    : state.sheetMode === 'existing'
+    ? '延續舊表'
+    : '新試算表';
   document.getElementById(
     'currentSheetBadgeText'
-  ).textContent = `📊 ${state.sheetName}（${modeLabel}・共 ${state.mistakes.length} 題）`;
+  ).textContent = `📊 ${state.sheetName}（${syncType}・共 ${state.mistakes.length} 題）`;
   document.getElementById('navMistakeCount').textContent = String(
     state.mistakes.length
   );
+  const btnLinked = document.getElementById('btnOpenLinkedGoogleSheet');
+  if (btnLinked) {
+    btnLinked.style.display = state.linkedGoogleSheetUrl ? 'inline-flex' : 'none';
+  }
 }
 
 function updateSubjectDropdownFilters() {
