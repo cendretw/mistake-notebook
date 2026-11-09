@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>錯題進化論｜互動式錯題釐清・PNG診斷卡・強化練習・試算表管理</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- SheetJS (xlsx) for Excel & Google Sheets compatibility -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- html2canvas for high-DPI PNG card export -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <!-- PDF.js for rendering exam PDFs and extracting text -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- Top Header -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-icon">📘</div>
+        <div>
+          <div class="brand-title">錯題進化論 Mistake Mastery</div>
+          <div class="brand-subtitle">PDF 試卷框選 × 互動式錯題診斷 × PNG 錯題卡 × 強化再練習 × Excel / Google 試算表無縫接軌</div>
+        </div>
+      </div>
+
+      <!-- Current Spreadsheet Status Pill -->
+      <div class="sheet-status-bar" id="headerSheetStatus">
+        <span class="sheet-status-dot"></span>
+        <span id="currentSheetBadgeText">目前試算表：尚未選擇</span>
+        <button class="btn btn-ghost-light btn-sm" id="btnOpenSheetModal" title="切換試算表或載入舊檔">
+          🔄 切換 / 載入試算表
+        </button>
+      </div>
+
+      <div class="header-actions">
+        <button class="btn btn-ghost-light btn-sm" id="btnLoadDemoData">
+          ✨ 載入範例試卷與錯題
+        </button>
+        <button class="btn btn-success btn-sm" id="btnQuickExportExcel">
+          📥 儲存下載 Excel / Google 試算表
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Step Navigation Bar -->
+  <nav class="nav-tabs-bar">
+    <div class="nav-tabs-inner">
+      <button class="nav-tab active" data-tab="tab-record">
+        <span class="tab-step-num">1</span>
+        <span>📄 試卷對照與錯題釐清</span>
+      </button>
+      <button class="nav-tab" data-tab="tab-cards">
+        <span class="tab-step-num">2</span>
+        <span>🖼️ 錯題診斷卡 & 下載 PNG</span>
+        <span class="badge-count" id="navMistakeCount">0</span>
+      </button>
+      <button class="nav-tab" data-tab="tab-practice">
+        <span class="tab-step-num">3</span>
+        <span>🎯 錯題強化再練習</span>
+      </button>
+      <button class="nav-tab" data-tab="tab-sheet">
+        <span class="tab-step-num">4</span>
+        <span>📊 試算表總覽與匯出 (Excel / Google 試算表)</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Main Workspace -->
+  <main class="main-container">
+
+    <!-- ==========================================
+         TAB 1: 試卷 PDF 對照 + 互動錯題釐清輸入
+         ========================================== -->
+    <section class="tab-panel active" id="tab-record">
+      <div class="workspace-grid">
+
+        <!-- Left Column: PDF Viewer & Answer Key -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span>📑 試卷 PDF 與標準答案檢視器</span>
+            </div>
+            <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+              <button class="btn btn-secondary btn-sm" id="btnToggleAnswerDrawer">
+                🔑 快速設定標準答案表
+              </button>
+              <button class="btn btn-secondary btn-sm" id="btnGenerateSamplePdf">
+                🧪 產生內建測試試卷畫面
+              </button>
+            </div>
+          </div>
+
+          <div class="panel-body">
+            <!-- Upload Bar for Exam PDF and Answer Key PDF/Image -->
+            <div class="pdf-upload-bar">
+              <label class="upload-box" id="examUploadBox">
+                <div class="upload-info">
+                  <span class="upload-label">📄 1. 上傳試卷 PDF / 圖片</span>
+                  <span class="upload-filename" id="examFileName">點擊選擇試卷 PDF 或圖檔...</span>
+                </div>
+                <span class="btn btn-primary btn-sm">選擇檔案</span>
+                <input type="file" id="inputExamFile" accept=".pdf,image/*" hidden />
+              </label>
+
+              <label class="upload-box" id="answerUploadBox">
+                <div class="upload-info">
+                  <span class="upload-label">✅ 2. 上傳解答 PDF / 圖片 (選填)</span>
+                  <span class="upload-filename" id="answerFileName">點擊選擇解答檔，或手動輸入答案</span>
+                </div>
+                <span class="btn btn-secondary btn-sm">選擇解答</span>
+                <input type="file" id="inputAnswerFile" accept=".pdf,image/*" hidden />
+              </label>
+            </div>
+
+            <!-- Collapsible Quick Answer Key Input Drawer -->
+            <div class="answer-key-drawer" id="answerKeyDrawer" style="display:none;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+                <strong style="font-size:0.88rem; color:#1e293b;">🔑 整份試卷標準答案快填區（輸入題號時將自動帶入正確答案）</strong>
+                <button class="btn btn-secondary btn-sm" id="btnCloseAnswerDrawer">收起</button>
+              </div>
+              <p style="font-size:0.8rem; color:#64748b; margin-bottom:0.5rem;">
+                支援兩種格式：① 依序輸入連續答案如 <code>ACDBB</code>（代表第1~5題） ② 指定題號如 <code>1:A, 2:C, 3:D, 4:B</code>
+              </p>
+              <div style="display:flex; gap:0.5rem;">
+                <input type="text" class="form-input" id="inputBulkAnswers" placeholder="例如：1:B, 2:C, 3:A, 4:D 或直接輸入 BCAD..." />
+                <button class="btn btn-primary btn-sm" id="btnApplyBulkAnswers" style="white-space:nowrap;">套用答案表</button>
+              </div>
+              <div class="answer-key-grid" id="answerKeyChipsContainer"></div>
+            </div>
+
+            <!-- PDF Viewer Toolbar -->
+            <div class="pdf-toolbar">
+              <div class="pdf-toolbar-group">
+                <button class="btn btn-sm btn-ghost-light" id="btnViewExamDoc" style="background:rgba(79,70,229,0.85);">📄 看試卷</button>
+                <button class="btn btn-sm btn-ghost-light" id="btnViewAnswerDoc">✅ 看解答檔</button>
+              </div>
+
+              <div class="pdf-toolbar-group">
+                <button class="btn btn-sm btn-ghost-light" id="btnPrevPage" disabled>◀ 上一頁</button>
+                <span style="font-size:0.85rem; padding:0 0.35rem;" id="pdfPageIndicator">第 0 / 0 頁</span>
+                <button class="btn btn-sm btn-ghost-light" id="btnNextPage" disabled>下一頁 ▶</button>
+              </div>
+
+              <div class="pdf-toolbar-group">
+                <button class="btn btn-sm btn-ghost-light" id="btnZoomOut" title="縮小">➖</button>
+                <span style="font-size:0.82rem; min-width:44px; text-align:center;" id="pdfZoomIndicator">100%</span>
+                <button class="btn btn-sm btn-ghost-light" id="btnZoomIn" title="放大">➕</button>
+              </div>
+
+              <div class="pdf-toolbar-group">
+                <button class="btn btn-sm btn-crop-toggle" id="btnToggleCropMode">
+                  ✂️ 框選題目截圖＋擷取文字
+                </button>
+              </div>
+            </div>
+
+            <div id="cropHintBanner" style="display:none; background:#fef3c7; color:#92400e; padding:0.55rem 0.85rem; border-radius:8px; font-size:0.85rem; font-weight:600; margin-bottom:0.65rem; border:1px solid #fde68a;">
+              💡 請在下方試卷畫面上「按住滑鼠左鍵拖曳」框出你做錯的那一題！系統會自動把該題截圖放入錯題卡，並自動抓取框內的題目文字與選項。
+            </div>
+
+            <!-- PDF / Image Canvas Viewport -->
+            <div class="pdf-canvas-viewport" id="pdfViewport">
+              <div class="pdf-empty-state" id="pdfEmptyState">
+                <div class="pdf-empty-icon">📄</div>
+                <h3 style="color:#ffffff; margin-bottom:0.4rem;">尚未載入試卷檔案</h3>
+                <p style="font-size:0.88rem; margin-bottom:1rem;">
+                  請點擊上方「上傳試卷 PDF / 圖片」，即可在畫面上直接框選錯題截圖、自動擷取題目文字！<br/>
+                  （若沒有 PDF，也可以直接在右側手動輸入題目，或點下方按鈕體驗內建測試試卷）
+                </p>
+                <button class="btn btn-primary" id="btnEmptyStateSamplePdf">
+                  🧪 立即產生互動測試試卷
+                </button>
+              </div>
+
+              <div class="pdf-canvas-wrapper" id="pdfCanvasWrapper" style="display:none;">
+                <canvas id="pdfCanvas"></canvas>
+                <canvas id="cropOverlayCanvas"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Column: Interactive Mistake Clarification Wizard -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <div class="panel-title">
+              <span>🧭 互動式錯題釐清與記錄精靈</span>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="btnResetForm">🧹 清空重填</button>
+          </div>
+
+          <div class="panel-body">
+            <form id="mistakeForm" onsubmit="return false;">
+              <input type="hidden" id="editingMistakeId" value="" />
+
+              <!-- Step 1: 題目基本資訊與內容 -->
+              <div class="form-section">
+                <div class="section-badge-title">
+                  <span>STEP 1｜題目資訊與選項內容</span>
+                  <span style="font-size:0.78rem; color:#64748b; font-weight:500;">可從左側試卷框選自動帶入</span>
+                </div>
+
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label">科目</label>
+                    <input type="text" class="form-input" id="fieldSubject" list="subjectList" placeholder="例如：數學、自然、英文" value="自然科學" required />
+                    <datalist id="subjectList">
+                      <option value="國文"></option>
+                      <option value="英文"></option>
+                      <option value="數學"></option>
+                      <option value="自然科學"></option>
+                      <option value="物理"></option>
+                      <option value="化學"></option>
+                      <option value="生物"></option>
+                      <option value="地球科學"></option>
+                      <option value="歷史"></option>
+                      <option value="地理"></option>
+                      <option value="公民"></option>
+                    </datalist>
+                  </div>
+
+                  <div class="form-group">
+                    <label class="form-label">試卷名稱 / 單元</label>
+                    <input type="text" class="form-input" id="fieldUnit" placeholder="例如：第一次段考 / 力與運動" value="第一次段考複習卷" />
+                  </div>
+
+                  <div class="form-group" style="max-width:120px;">
+                    <label class="form-label">題號</label>
+                    <input type="text" class="form-input" id="fieldQuestionNum" placeholder="例如：12" required />
+                  </div>
+                </div>
+
+                <!-- Cropped Question Image Preview -->
+                <div id="cropPreviewArea" class="crop-preview-container" style="display:none;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.35rem;">
+                    <span style="font-size:0.8rem; font-weight:700; color:#4f46e5;">📸 已擷取試卷題目截圖（將顯示於 PNG 錯題卡與練習題中）</span>
+                    <button type="button" class="btn btn-danger-outline btn-sm" id="btnRemoveCropImg">移除截圖</button>
+                  </div>
+                  <img id="cropPreviewImg" src="" alt="題目截圖預覽" />
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">
+                    <span>題目敘述（題幹）</span>
+                    <button type="button" class="btn btn-secondary btn-sm" id="btnParseRawQuestion" title="若貼上整題文字含(A)(B)(C)(D)，點此自動拆出四個選項">✨ 自動拆分題幹與 (A)(B)(C)(D) 選項</button>
+                  </label>
+                  <textarea class="form-textarea" id="fieldQuestionText" placeholder="請輸入題目文字，或在左側試卷用「✂️ 框選題目截圖＋擷取文字」自動填入..."></textarea>
+                </div>
+
+                <div class="form-row" style="grid-template-columns: 1fr 1fr;">
+                  <div class="form-group">
+                    <label class="form-label">選項 (A)</label>
+                    <input type="text" class="form-input" id="fieldOptA" placeholder="選項 A 內容（選填，填寫後練習可隨機打亂選項）" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">選項 (B)</label>
+                    <input type="text" class="form-input" id="fieldOptB" placeholder="選項 B 內容" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">選項 (C)</label>
+                    <input type="text" class="form-input" id="fieldOptC" placeholder="選項 C 內容" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">選項 (D)</label>
+                    <input type="text" class="form-input" id="fieldOptD" placeholder="選項 D 內容" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Step 2: 選擇錯誤答案 vs 正確答案 -->
+              <div class="form-section">
+                <div class="section-badge-title">
+                  <span>STEP 2｜比對「我的誤選」與「正確答案」</span>
+                  <span id="autoAnswerMatchHint" style="font-size:0.78rem; color:#059669; font-weight:600;"></span>
+                </div>
+
+                <div class="choice-selector-row">
+                  <!-- Student's Wrong Answer -->
+                  <div class="choice-box wrong-box">
+                    <label class="form-label" style="color:#b91c1c;">❌ 我當初選錯的答案</label>
+                    <div class="option-pills" id="wrongOptionPills">
+                      <button type="button" class="option-pill" data-val="A">A</button>
+                      <button type="button" class="option-pill" data-val="B">B</button>
+                      <button type="button" class="option-pill" data-val="C">C</button>
+                      <button type="button" class="option-pill" data-val="D">D</button>
+                    </div>
+                    <input type="text" class="form-input" id="fieldWrongAnswer" placeholder="點上方按鈕或直接輸入誤選答案" style="margin-top:0.5rem;" required />
+                  </div>
+
+                  <!-- Correct Answer -->
+                  <div class="choice-box correct-box">
+                    <label class="form-label" style="color:#15803d;">✅ 試卷正確答案</label>
+                    <div class="option-pills" id="correctOptionPills">
+                      <button type="button" class="option-pill" data-val="A">A</button>
+                      <button type="button" class="option-pill" data-val="B">B</button>
+                      <button type="button" class="option-pill" data-val="C">C</button>
+                      <button type="button" class="option-pill" data-val="D">D</button>
+                    </div>
+                    <input type="text" class="form-input" id="fieldCorrectAnswer" placeholder="點上方按鈕或直接輸入正確答案" style="margin-top:0.5rem;" required />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Step 3: 蘇格拉底式互動錯題診斷（協助釐清錯在哪裡） -->
+              <div class="form-section form-section-highlight">
+                <div class="section-badge-title">
+                  <span>STEP 3｜🔍 互動式錯題診斷：幫你一步步釐清「到底錯在哪裡」</span>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">1️⃣ 先誠實勾選：這題屬於哪一種錯誤類型？（可複選，點選後下方會出現專屬診斷引導）</label>
+                  <div class="error-tags-grid" id="errorTagsContainer">
+                    <button type="button" class="diagnosis-tag" data-tag="審題失誤">🔍 審題失誤（看錯題目/漏看關鍵字）</button>
+                    <button type="button" class="diagnosis-tag" data-tag="觀念混淆">🧠 觀念混淆（把相似定義/公式搞混）</button>
+                    <button type="button" class="diagnosis-tag" data-tag="掉入陷阱">🪤 掉入陷阱（被誘答選項誤導）</button>
+                    <button type="button" class="diagnosis-tag" data-tag="計算粗心">🔢 計算粗心（算式對但計算/正負號錯）</button>
+                    <button type="button" class="diagnosis-tag" data-tag="圖表判讀錯誤">📊 圖表判讀錯誤（座標軸/單位看錯）</button>
+                    <button type="button" class="diagnosis-tag" data-tag="完全不會">❓ 核心觀念不熟（看到題目不知如何下手）</button>
+                  </div>
+                </div>
+
+                <!-- Dynamic Guided Prompt Box -->
+                <div class="guided-prompt-box" id="guidedPromptBox">
+                  <div id="guidedPromptQuestion" style="font-weight:700; margin-bottom:0.25rem;">
+                    💡 診斷引導：請先點選上方的「錯誤類型標籤」，系統會根據你選的誤選答案與正解，提供具體的反思提問與快填句型！
+                  </div>
+                  <div style="font-size:0.78rem; color:#b45309;">👇 點擊下方常見原因可快速帶入診斷筆記：</div>
+                  <div class="quick-phrase-chips" id="quickPhraseChips"></div>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">2️⃣ 破除迷思：為什麼我當初會選錯？那個錯誤選項錯在哪裡？</label>
+                  <textarea class="form-textarea" id="fieldWhyWrong" placeholder="例如：我沒看到題目問「何者錯誤」，或是我誤以為選項 (B) 的加速度方向一定跟速度方向相同..." required></textarea>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">3️⃣ 正確觀念重建：推導出正確答案的關鍵步驟 / 核心觀念是什麼？</label>
+                  <textarea class="form-textarea" id="fieldCorrectConcept" placeholder="例如：物體減速時，加速度方向與速度方向相反，因此正確答案應選 (C)..." required></textarea>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">
+                    <span>4️⃣ 💡 給未來自己的一句話（避坑錦囊 / 關鍵秒殺口訣）</span>
+                    <span style="font-size:0.76rem; color:#4f46e5;">※ 進行錯題強化練習時，可作為作答前提示！</span>
+                  </label>
+                  <input type="text" class="form-input" id="fieldKeyTakeaway" placeholder="例如：看到「減速運動」立刻想到「a 與 v 反向」；題目問「何者有誤」要先畫雙底線！" required />
+                </div>
+              </div>
+
+              <div style="display:flex; gap:0.75rem; justify-content:flex-end; flex-wrap:wrap;">
+                <button type="button" class="btn btn-secondary btn-lg" id="btnSaveAndPractice">
+                  💾 儲存錯題並立即開始練習
+                </button>
+                <button type="submit" class="btn btn-primary btn-lg" id="btnSubmitMistake">
+                  ✅ 儲存這筆錯題（加入錯題卡與試算表）
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ==========================================
+         TAB 2: 錯題診斷卡總覽 & 下載 PNG
+         ========================================== -->
+    <section class="tab-panel" id="tab-cards">
+      <div class="cards-filter-bar">
+        <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+          <h2 style="font-size:1.15rem; font-weight:700;">🖼️ 我的錯題診斷卡總覽</h2>
+          <select class="form-select" id="filterCardSubject" style="width:auto; min-width:140px;">
+            <option value="ALL">全部科目</option>
+          </select>
+          <select class="form-select" id="filterCardStatus" style="width:auto; min-width:150px;">
+            <option value="ALL">全部熟練狀態</option>
+            <option value="待加強">🔴 待加強</option>
+            <option value="複習中">🟡 複習中</option>
+            <option value="已精通">🟢 已精通</option>
+          </select>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+          <button class="btn btn-secondary" id="btnDownloadAllPng">
+            📦 批次下載全部錯題 PNG
+          </button>
+          <button class="btn btn-primary" id="btnGoToPracticeFromCards">
+            🎯 用這些錯題進行強化練習 →
+          </button>
+        </div>
+      </div>
+
+      <div id="cardsEmptyState" class="panel-card" style="padding:3.5rem 1.5rem; text-align:center; display:none;">
+        <div style="font-size:3rem; margin-bottom:0.5rem;">🗂️</div>
+        <h3>目前還沒有錯題紀錄喔！</h3>
+        <p style="color:#64748b; margin:0.5rem 0 1.25rem;">
+          請前往「1. 試卷對照與錯題釐清」新增錯題，或點選右上角「✨ 載入範例試卷與錯題」立即體驗。
+        </p>
+        <button class="btn btn-primary" onclick="switchTab('tab-record')">前往新增第一筆錯題</button>
+      </div>
+
+      <div class="mistakes-grid" id="mistakesCardsContainer"></div>
+    </section>
+
+    <!-- ==========================================
+         TAB 3: 錯題強化再練習（互動測驗系統）
+         ========================================== -->
+    <section class="tab-panel" id="tab-practice">
+      <div class="quiz-container">
+
+        <!-- Quiz Setup / Dashboard Card -->
+        <div class="panel-card" id="quizSetupPanel">
+          <div class="panel-header">
+            <div class="panel-title">🎯 錯題強化再練習中心（強化正確觀念・防死背答案）</div>
+          </div>
+          <div class="panel-body">
+            <p style="color:#475569; margin-bottom:1.15rem;">
+              系統會將你整理好的錯題轉化為互動練習測驗。為了確保你是<strong>真正弄懂觀念</strong>而不是死背「這題選 C」，系統支援<strong>自動打亂選項順序</strong>，並在作答時驗證你對核心觀念的理解！練習結果會自動更新回試算表的「練習次數」與「熟練狀態」。
+            </p>
+
+            <div class="form-row" style="margin-bottom:1.25rem;">
+              <div class="form-group">
+                <label class="form-label">練習範圍篩選（科目）</label>
+                <select class="form-select" id="quizFilterSubject">
+                  <option value="ALL">全部科目</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">熟練度篩選</label>
+                <select class="form-select" id="quizFilterMastery">
+                  <option value="ALL">全部錯題（含待加強與已精通）</option>
+                  <option value="UNMASTERED">僅測驗尚未精通（🔴 待加強 / 🟡 複習中）</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-section" style="background:#f8fafc;">
+              <div style="font-weight:700; margin-bottom:0.65rem; color:#1e293b;">⚙️ 強化練習智慧設定</div>
+              <div style="display:flex; flex-direction:column; gap:0.55rem; font-size:0.92rem;">
+                <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
+                  <input type="checkbox" id="chkShuffleQuestions" checked style="width:18px; height:18px;" />
+                  <span>🔀 <strong>隨機打亂出題順序</strong></span>
+                </label>
+                <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
+                  <input type="checkbox" id="chkShuffleOptions" checked style="width:18px; height:18px;" />
+                  <span>🛡️ <strong>自動打亂 (A)(B)(C)(D) 選項位置</strong>（若該題有填寫選項文字，重新洗牌防止死記選項代號）</span>
+                </label>
+                <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
+                  <input type="checkbox" id="chkConceptVerify" checked style="width:18px; height:18px;" />
+                  <span>🧠 <strong>啟用「觀念雙重驗證」</strong>（選出答案後，還需正確選出這題的「核心觀念解析」才算真正過關！）</span>
+                </label>
+                <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
+                  <input type="checkbox" id="chkShowHintFirst" style="width:18px; height:18px;" />
+                  <span>💡 作答時預設顯示我當初寫的「避坑錦囊」提示（不勾選則可於作答中手動點開提示）</span>
+                </label>
+              </div>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem; margin-top:1.25rem;">
+              <div id="quizAvailableCountInfo" style="font-weight:700; color:#4f46e5;">
+                目前共有 0 題錯題可供練習
+              </div>
+              <button class="btn btn-primary btn-lg" id="btnStartQuiz">
+                🚀 開始錯題強化練習
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Active Quiz Arena -->
+        <div class="panel-card" id="quizActivePanel" style="display:none;">
+          <div class="panel-header" style="background:#1e293b; color:#ffffff;">
+            <div style="display:flex; align-items:center; gap:0.75rem;">
+              <span id="quizProgressBadge" style="background:#4f46e5; padding:0.25rem 0.7rem; border-radius:999px; font-size:0.85rem; font-weight:700;">第 1 / 5 題</span>
+              <span id="quizSubjectTitle" style="font-weight:700;">自然科學｜第一次段考</span>
+            </div>
+            <button class="btn btn-ghost-light btn-sm" id="btnQuitQuiz">結束練習</button>
+          </div>
+
+          <div class="panel-body">
+            <!-- Past Error Warning Badge -->
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.85rem;">
+              <div id="quizErrorTagsBanner" style="font-size:0.84rem; color:#b45309; background:#fef3c7; padding:0.35rem 0.75rem; border-radius:999px; font-weight:600;"></div>
+              <button class="btn btn-secondary btn-sm" id="btnToggleQuizHint">💡 查看我的「避坑錦囊」提示</button>
+            </div>
+
+            <!-- Takeaway Hint Box -->
+            <div id="quizHintBox" style="display:none; background:#fffbeb; border:1px solid #fde68a; border-radius:10px; padding:0.75rem 1rem; margin-bottom:1rem; color:#92400e; font-weight:600;"></div>
+
+            <!-- Question Image & Stem -->
+            <div id="quizImageWrapper" style="text-align:center; margin-bottom:1rem; display:none;">
+              <img id="quizQuestionImg" src="" alt="題目截圖" style="max-width:100%; max-height:280px; border-radius:8px; border:1px solid #cbd5e1;" />
+            </div>
+
+            <div id="quizQuestionStem" style="font-size:1.08rem; font-weight:700; color:#1e293b; margin-bottom:1.15rem; white-space:pre-wrap; background:#f8fafc; padding:1rem; border-radius:10px; border:1px solid #e2e8f0;"></div>
+
+            <!-- Step 1: Answer Selection -->
+            <div id="quizOptionsContainer" style="margin-bottom:1.25rem;"></div>
+
+            <!-- Step 2: Concept Double-Check (Shown if chkConceptVerify is enabled) -->
+            <div id="quizConceptVerifyBox" style="display:none; background:#f5f7ff; border:2px solid #c7d2fe; border-radius:12px; padding:1rem; margin-bottom:1.25rem;">
+              <div style="font-weight:700; color:#312e81; margin-bottom:0.65rem;">
+                🧠 觀念雙重確認：請問這題之所以選這個答案，背後的「正確核心觀念」是哪一個？
+              </div>
+              <div id="quizConceptOptionsList"></div>
+            </div>
+
+            <!-- Feedback Box after Answering -->
+            <div id="quizFeedbackBox" style="display:none; border-radius:12px; padding:1.15rem; margin-bottom:1.25rem;"></div>
+
+            <div style="display:flex; justify-content:flex-end; gap:0.75rem;">
+              <button class="btn btn-primary btn-lg" id="btnSubmitQuizAnswer">確認送出答案</button>
+              <button class="btn btn-success btn-lg" id="btnNextQuizQuestion" style="display:none;">下一題 ▶</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quiz Summary Report -->
+        <div class="panel-card" id="quizResultPanel" style="display:none;">
+          <div class="panel-header">
+            <div class="panel-title">🏆 錯題強化練習完成報告</div>
+          </div>
+          <div class="panel-body" style="text-align:center; padding:2rem 1.5rem;">
+            <div style="font-size:3.4rem; margin-bottom:0.5rem;" id="quizResultEmoji">🎉</div>
+            <h2 id="quizResultHeadline" style="margin-bottom:0.5rem;">太棒了！你完成了本次錯題強化練習</h2>
+            <p id="quizResultSubtext" style="color:#64748b; margin-bottom:1.5rem;"></p>
+
+            <div style="display:flex; justify-content:center; gap:1rem; flex-wrap:wrap;">
+              <button class="btn btn-secondary btn-lg" id="btnRetryWrongOnly" style="display:none;">
+                🔁 針對剛剛答錯的題目再次特訓
+              </button>
+              <button class="btn btn-secondary btn-lg" id="btnBackToQuizSetup">
+                ⚙️ 返回練習設定
+              </button>
+              <button class="btn btn-success btn-lg" onclick="switchTab('tab-sheet')">
+                📊 前往匯出更新後的試算表 (Excel / Google 試算表)
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ==========================================
+         TAB 4: 試算表管理與匯出 (Excel / Google 試算表)
+         ========================================== -->
+    <section class="tab-panel" id="tab-sheet">
+      <div class="panel-card" style="margin-bottom:1.25rem;">
+        <div class="panel-header">
+          <div class="panel-title">📊 試算表連結狀態與匯出中心（支援 Excel 與 Google 試算表）</div>
+          <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+            <button class="btn btn-secondary btn-sm" id="btnTabChangeSheet">
+              📂 重新選擇：載入既有試算表 / 開啟新試算表
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-body">
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:1rem; margin-bottom:1.25rem;">
+            <div style="background:#f5f7ff; border:1px solid #c7d2fe; border-radius:12px; padding:1rem;">
+              <div style="font-size:0.82rem; color:#4f46e5; font-weight:700;">目前工作的試算表名稱</div>
+              <div style="font-size:1.15rem; font-weight:700; margin-top:0.2rem;" id="sheetInfoName">未命名錯題本</div>
+              <div style="font-size:0.8rem; color:#64748b; margin-top:0.25rem;" id="sheetInfoMode">模式：新建試算表</div>
+            </div>
+
+            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:1rem;">
+              <div style="font-size:0.82rem; color:#15803d; font-weight:700;">累積錯題總數 / 已精通數</div>
+              <div style="font-size:1.15rem; font-weight:700; margin-top:0.2rem;" id="sheetInfoStats">0 題（已精通 0 題）</div>
+              <div style="font-size:0.8rem; color:#64748b; margin-top:0.25rem;" id="sheetInfoNewCount">本次新增：0 題</div>
+            </div>
+
+            <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:12px; padding:1rem;">
+              <div style="font-size:0.82rem; color:#b45309; font-weight:700;">最常發生的錯誤原因診斷</div>
+              <div style="font-size:1.05rem; font-weight:700; margin-top:0.2rem;" id="sheetInfoTopError">尚無資料</div>
+              <div style="font-size:0.8rem; color:#64748b; margin-top:0.25rem;">考前優先複習該類盲點！</div>
+            </div>
+          </div>
+
+          <!-- Export Action Buttons -->
+          <div style="display:flex; gap:0.75rem; flex-wrap:wrap; padding:1rem; background:#f8fafc; border-radius:12px; border:1px solid var(--border);">
+            <button class="btn btn-success btn-lg" id="btnExportXlsx">
+              📥 下載完整 Excel 試算表 (.xlsx)
+            </button>
+            <button class="btn btn-primary btn-lg" id="btnExportCsvForGoogle">
+              📄 下載 Google 試算表專用檔 (.csv)
+            </button>
+            <button class="btn btn-secondary btn-lg" id="btnCopyTsvForGoogle">
+              📋 一鍵複製表格資料（可直接 Ctrl+V 貼入已開啟的雲端 Google 試算表）
+            </button>
+          </div>
+          <p style="font-size:0.82rem; color:#64748b; margin-top:0.6rem;">
+            💡 <strong>如何下次繼續使用同一個試算表？</strong> 下載儲存 <code>.xlsx</code> 或 <code>.csv</code> 後，下次打開本系統時選擇<strong>「繼續使用已有的試算表」</strong>並選取該檔案，系統就會自動載入所有歷史錯題、截圖與練習熟練度，讓你在同一份試算表無縫接續紀錄！
+          </p>
+        </div>
+      </div>
+
+      <!-- Data Table Preview -->
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">📋 試算表內容即時預覽（共 <span id="tableRowCount">0</span> 筆錯題紀錄）</div>
+        </div>
+        <div class="panel-body" style="padding:0;">
+          <div class="data-table-wrapper">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>題號 / 科目</th>
+                  <th>試卷單元</th>
+                  <th>題目內容與選項</th>
+                  <th>誤選 vs 正解</th>
+                  <th>錯誤類型標籤</th>
+                  <th>為何選錯 & 正確觀念</th>
+                  <th>💡 避坑錦囊</th>
+                  <th>練習熟練度</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="sheetTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ==========================================
+       MODAL: 詢問是否有已使用的試算表要繼續使用，還是開啟新的試算表
+       ========================================== -->
+  <div class="modal-backdrop" id="sheetInitModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div style="font-size:0.85rem; opacity:0.9; font-weight:600; margin-bottom:0.25rem;">WELCOME TO MISTAKE MASTERY</div>
+        <h2 style="font-size:1.35rem; font-weight:700;">📊 請問您是否有已經使用的試算表要繼續使用，還是要開啟新的試算表？</h2>
+      </div>
+
+      <div class="modal-body">
+        <p style="color:#475569; font-size:0.92rem; margin-bottom:1rem;">
+          本系統支援將錯題與強化練習紀錄保存為 <strong>Excel (.xlsx)</strong> 或 <strong>Google 試算表 (.csv)</strong>。請選擇您的開始方式：
+        </p>
+
+        <div class="sheet-choice-cards">
+          <!-- Choice 1: Continue Existing Spreadsheet -->
+          <div class="sheet-choice-card" id="cardChoiceExisting">
+            <div style="font-size:2rem;">📂</div>
+            <h3 style="font-size:1.05rem; font-weight:700; color:#1e293b;">繼續使用已有的試算表</h3>
+            <p style="font-size:0.84rem; color:#64748b;">
+              上傳您之前儲存的錯題 Excel (<code>.xlsx</code>) 或從 Google 試算表匯出的 <code>.xlsx</code> / <code>.csv</code> 檔案，在原有紀錄後繼續新增錯題並複習舊題！
+            </p>
+            <div style="margin-top:auto; padding-top:0.75rem;">
+              <label class="btn btn-primary" style="width:100%;">
+                📤 選擇既有試算表檔案 (.xlsx / .csv)
+                <input type="file" id="inputExistingSheetFile" accept=".xlsx,.xls,.csv" hidden />
+              </label>
+            </div>
+          </div>
+
+          <!-- Choice 2: Create New Spreadsheet -->
+          <div class="sheet-choice-card selected" id="cardChoiceNew">
+            <div style="font-size:2rem;">✨</div>
+            <h3 style="font-size:1.05rem; font-weight:700; color:#1e293b;">開啟新的試算表</h3>
+            <p style="font-size:0.84rem; color:#64748b;">
+              建立一份全新的錯題本試算表，為本次段考、模擬考或特定科目開始記錄錯題。
+            </p>
+            <div style="margin-top:auto; padding-top:0.5rem;">
+              <label class="form-label" style="font-size:0.8rem;">新試算表檔案名稱：</label>
+              <input type="text" class="form-input" id="inputNewSheetName" value="我的錯題進化本_2026" placeholder="例如：高一數學段考錯題本" />
+              <button class="btn btn-primary" id="btnConfirmNewSheet" style="width:100%; margin-top:0.6rem;">
+                🚀 建立並開始記錄錯題
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- LocalStorage Autosave Recovery Banner (if existing local data found) -->
+        <div id="localAutosaveBanner" style="display:none; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:0.9rem 1.1rem; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+          <div>
+            <div style="font-weight:700; color:#15803d; font-size:0.9rem;">💾 偵測到瀏覽器上次未關閉的試算表暫存紀錄！</div>
+            <div style="font-size:0.82rem; color:#166534;" id="localAutosaveDesc"></div>
+          </div>
+          <button class="btn btn-success btn-sm" id="btnRestoreAutosave">接續上次暫存進度</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden Offscreen Render Container for High-Res Single Card PNG Export -->
+  <div id="pngExportStaging" style="position:fixed; left:-9999px; top:0; width:680px; z-index:-1;"></div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
