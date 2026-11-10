@@ -208,45 +208,56 @@
 
               <!-- Step 1: 題目基本資訊與內容 -->
               <div class="form-section">
-                <div class="section-badge-title">
-                  <span>STEP 1｜題目資訊與選項內容</span>
-                  <span style="font-size:0.78rem; color:#64748b; font-weight:500;">可從左側試卷框選自動帶入</span>
+                <div class="section-badge-title" style="flex-wrap:wrap; gap:0.4rem;">
+                  <span>STEP 1｜選擇題型 ＆ 題目內容</span>
+                  <span style="font-size:0.78rem; color:#64748b; font-weight:500;">框選試卷時會自動判別題型，亦可手動切換</span>
+                </div>
+
+                <!-- Question Type Switcher -->
+                <div class="form-group" style="margin-bottom:0.85rem;">
+                  <label class="form-label">🎯 本題題型（支援選擇、翻譯手寫、填充計算、閱讀圖表，全科適用！）</label>
+                  <div class="error-tags-grid" id="questionTypeContainer" style="margin-bottom:0;">
+                    <button type="button" class="diagnosis-tag selected" data-qtype="choice">🔘 選擇題／克漏字</button>
+                    <button type="button" class="diagnosis-tag" data-qtype="translation">✍️ 翻譯／簡答／手寫非選題</button>
+                    <button type="button" class="diagnosis-tag" data-qtype="fill">🔤 文意字彙／填充／理化數學計算</button>
+                    <button type="button" class="diagnosis-tag" data-qtype="reading">📖 閱讀測驗／地理圖表題組</button>
+                  </div>
                 </div>
 
                 <div class="form-row">
                   <div class="form-group">
                     <label class="form-label">科目</label>
-                    <input type="text" class="form-input" id="fieldSubject" list="subjectList" placeholder="例如：數學、自然、英文" value="自然科學" required />
+                    <input type="text" class="form-input" id="fieldSubject" list="subjectList" placeholder="例如：英文、物理、化學、地理" value="英文" required />
                     <datalist id="subjectList">
-                      <option value="國文"></option>
                       <option value="英文"></option>
+                      <option value="國文"></option>
                       <option value="數學"></option>
-                      <option value="自然科學"></option>
                       <option value="物理"></option>
                       <option value="化學"></option>
                       <option value="生物"></option>
                       <option value="地球科學"></option>
-                      <option value="歷史"></option>
+                      <option value="自然科學"></option>
                       <option value="地理"></option>
+                      <option value="歷史"></option>
                       <option value="公民"></option>
                     </datalist>
                   </div>
 
                   <div class="form-group">
                     <label class="form-label">試卷名稱 / 單元</label>
-                    <input type="text" class="form-input" id="fieldUnit" placeholder="例如：第一次段考 / 力與運動" value="第一次段考複習卷" />
+                    <input type="text" class="form-input" id="fieldUnit" placeholder="例如：U7 進階卷 / 牛頓運動定律 / 氣候與水文" value="段考複習卷" />
                   </div>
 
                   <div class="form-group" style="max-width:120px;">
                     <label class="form-label">題號</label>
-                    <input type="text" class="form-input" id="fieldQuestionNum" placeholder="例如：12" required />
+                    <input type="text" class="form-input" id="fieldQuestionNum" placeholder="例如：19" required />
                   </div>
                 </div>
 
                 <!-- Cropped Question Image Preview -->
                 <div id="cropPreviewArea" class="crop-preview-container" style="display:none;">
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.35rem; flex-wrap:wrap; gap:0.35rem;">
-                    <span style="font-size:0.8rem; font-weight:700; color:#4f46e5;">📸 已擷取試卷截圖（支援克漏字文章＋題目合併預覽）</span>
+                    <span style="font-size:0.8rem; font-weight:700; color:#4f46e5;">📸 已擷取試卷截圖（支援文章／圖表＋題目合併預覽）</span>
                     <button type="button" class="btn btn-danger-outline btn-sm" id="btnRemoveCropImg">移除截圖</button>
                   </div>
                   <img id="cropPreviewImg" src="" alt="題目截圖預覽" />
@@ -254,22 +265,23 @@
 
                 <!-- If multiple questions were detected in crop region, let student pick one -->
                 <div id="multiQuestionSelectorBar" style="display:none; background:#eef2ff; border:1px solid #c7d2fe; border-radius:8px; padding:0.55rem 0.8rem; margin-bottom:0.75rem; font-size:0.84rem;">
-                  <strong style="color:#312e81;">🎯 框選範圍內偵測到多題選項，請點選你要記錄哪一題：</strong>
+                  <strong style="color:#312e81;">🎯 框選範圍內偵測到多題，請點選你要記錄哪一題：</strong>
                   <div id="multiQuestionButtons" style="display:flex; gap:0.4rem; flex-wrap:wrap; margin-top:0.4rem;"></div>
                 </div>
 
                 <div class="form-group">
                   <label class="form-label">
-                    <span>題目敘述 / 克漏字上下文（選填，僅提供截圖亦可）</span>
-                    <button type="button" class="btn btn-secondary btn-sm" id="btnParseRawQuestion" title="若貼上整題文字含(A)(B)(C)(D)，點此自動拆出四個選項">✨ 自動整理題號與 (A)(B)(C)(D)</button>
+                    <span id="labelQuestionStem">題目敘述 / 翻譯原句 / 計算題幹（若已框選截圖，此欄可選填）</span>
+                    <button type="button" class="btn btn-secondary btn-sm" id="btnParseRawQuestion" title="自動整理題號與選項">✨ 自動整理題目格式</button>
                   </label>
-                  <textarea class="form-textarea" id="fieldQuestionText" placeholder="在左側試卷框選題目會自動帶入，若為克漏字也可貼上該句上下文（或只留截圖與選項即可）..."></textarea>
+                  <textarea class="form-textarea" id="fieldQuestionText" placeholder="在左側試卷框選題目會自動帶入；若為翻譯題可輸入中文題目、若為物理化學地理可輸入題幹或關鍵條件..."></textarea>
                 </div>
 
-                <div class="form-row" style="grid-template-columns: 1fr 1fr;">
+                <!-- Options A/B/C/D (Automatically hidden when Question Type is Translation / Fill / Calculation!) -->
+                <div class="form-row" id="optionsFourGrid" style="grid-template-columns: 1fr 1fr;">
                   <div class="form-group">
                     <label class="form-label">選項 (A)</label>
-                    <input type="text" class="form-input" id="fieldOptA" placeholder="選項 A 內容（選填，填寫後練習可隨機打亂選項）" />
+                    <input type="text" class="form-input" id="fieldOptA" placeholder="選項 A 內容" />
                   </div>
                   <div class="form-group">
                     <label class="form-label">選項 (B)</label>
@@ -286,37 +298,43 @@
                 </div>
               </div>
 
-              <!-- Step 2: 選擇錯誤答案 vs 正確答案 -->
+              <!-- Step 2: 選擇錯誤答案 vs 正確答案 (Adapts to Multiple-Choice vs Translation/Calculation!) -->
               <div class="form-section">
                 <div class="section-badge-title">
-                  <span>STEP 2｜比對「我的誤選」與「正確答案」</span>
+                  <span id="step2TitleText">STEP 2｜比對「我的誤選／錯誤寫法」與「正確答案」</span>
                   <span id="autoAnswerMatchHint" style="font-size:0.78rem; color:#059669; font-weight:600;"></span>
                 </div>
 
-                <div class="choice-selector-row">
+                <div class="choice-selector-row" id="step2ChoiceRow">
                   <!-- Student's Wrong Answer -->
                   <div class="choice-box wrong-box">
-                    <label class="form-label" style="color:#b91c1c;">❌ 我當初選錯的答案</label>
+                    <label class="form-label" id="labelWrongAns" style="color:#b91c1c;">❌ 我當初選錯的答案 / 錯誤寫法</label>
                     <div class="option-pills" id="wrongOptionPills">
                       <button type="button" class="option-pill" data-val="A">A</button>
                       <button type="button" class="option-pill" data-val="B">B</button>
                       <button type="button" class="option-pill" data-val="C">C</button>
                       <button type="button" class="option-pill" data-val="D">D</button>
                     </div>
-                    <input type="text" class="form-input" id="fieldWrongAnswer" placeholder="點上方按鈕或直接輸入誤選答案" style="margin-top:0.5rem;" required />
+                    <input type="text" class="form-input" id="fieldWrongAnswer" placeholder="點上方按鈕或直接輸入你寫錯的句子／單字／計算數值" style="margin-top:0.5rem;" required />
                   </div>
 
                   <!-- Correct Answer -->
                   <div class="choice-box correct-box">
-                    <label class="form-label" style="color:#15803d;">✅ 試卷正確答案</label>
+                    <label class="form-label" id="labelCorrectAns" style="color:#15803d;">✅ 試卷正確答案 / 標準解答</label>
                     <div class="option-pills" id="correctOptionPills">
                       <button type="button" class="option-pill" data-val="A">A</button>
                       <button type="button" class="option-pill" data-val="B">B</button>
                       <button type="button" class="option-pill" data-val="C">C</button>
                       <button type="button" class="option-pill" data-val="D">D</button>
                     </div>
-                    <input type="text" class="form-input" id="fieldCorrectAnswer" placeholder="點上方按鈕或直接輸入正確答案" style="margin-top:0.5rem;" required />
+                    <input type="text" class="form-input" id="fieldCorrectAnswer" placeholder="點上方按鈕或直接輸入正確翻譯句子／單字／標準答案" style="margin-top:0.5rem;" required />
                   </div>
+                </div>
+
+                <!-- Live Visual Diff Box for Translation / Fill-in-the-blank / Calculation -->
+                <div id="liveTextDiffBox" style="display:none; background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:0.65rem 0.85rem; font-size:0.86rem;">
+                  <div style="font-weight:700; color:#334155; margin-bottom:0.25rem;">🔍 系統逐字比對（紅色刪除線＝你寫錯／多寫；綠色底線＝正確應寫／漏寫）：</div>
+                  <div id="liveTextDiffContent" style="line-height:1.7;"></div>
                 </div>
               </div>
 
@@ -558,8 +576,22 @@
 
             <div id="quizQuestionStem" style="font-size:1.08rem; font-weight:700; color:#1e293b; margin-bottom:1.15rem; white-space:pre-wrap; background:#f8fafc; padding:1rem; border-radius:10px; border:1px solid #e2e8f0;"></div>
 
-            <!-- Step 1: Answer Selection -->
+            <!-- Step 1A: Answer Selection (For Multiple-Choice Questions) -->
             <div id="quizOptionsContainer" style="margin-bottom:1.25rem;"></div>
+
+            <!-- Step 1B: Direct Text / Translation / Calculation Input (For Non-Choice Questions!) -->
+            <div id="quizTextInputContainer" style="display:none; background:#ffffff; border:2px solid #cbd5e1; border-radius:12px; padding:1rem; margin-bottom:1.25rem;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem; flex-wrap:wrap; gap:0.4rem;">
+                <label class="form-label" id="quizTextInputLabel" style="font-size:0.95rem; color:#1e293b; margin:0;">
+                  ✍️ 請輸入你的答案（翻譯句子／單字填充／計算結果）：
+                </label>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnShowSkeletonHint">
+                  💡 提示骨架／首字母／單位
+                </button>
+              </div>
+              <div id="quizSkeletonHintText" style="display:none; font-size:0.86rem; color:#4f46e5; background:#eef2ff; padding:0.45rem 0.75rem; border-radius:6px; margin-bottom:0.55rem; font-family:monospace; font-weight:700;"></div>
+              <textarea class="form-textarea" id="quizUserTypedAnswer" placeholder="請在此輸入完整翻譯句子、英文單字或物理/化學/數學計算答案..." style="font-size:1rem; min-height:74px;"></textarea>
+            </div>
 
             <!-- Step 2: Concept Double-Check (Shown if chkConceptVerify is enabled) -->
             <div id="quizConceptVerifyBox" style="display:none; background:#f5f7ff; border:2px solid #c7d2fe; border-radius:12px; padding:1rem; margin-bottom:1.25rem;">

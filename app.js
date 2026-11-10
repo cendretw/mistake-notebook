@@ -17,6 +17,7 @@ const state = {
   excelFileHandle: null, // FileSystemFileHandle for real-time local .xlsx sync
   linkedGoogleSheetUrl: '', // URL to user's cloud Google Sheet
   mistakes: [],
+  questionType: 'choice', // 'choice' | 'translation' | 'fill' | 'reading'
   answerKeyMap: {}, // { "1": "C", "2": "B", ... }
   selectedErrorTags: new Set(),
   currentCropDataUrl: '',
@@ -450,12 +451,29 @@ function parseJsonRowsToMistakes(jsonRows) {
             .filter(Boolean)
         : ['觀念混淆'];
 
+      const rawTypeLabel = String(row['題型'] || '').trim();
+      let inferredType = 'choice';
+      if (rawTypeLabel.includes('翻譯') || rawTypeLabel.includes('非選')) {
+        inferredType = 'translation';
+      } else if (rawTypeLabel.includes('填充') || rawTypeLabel.includes('計算') || rawTypeLabel.includes('字彙')) {
+        inferredType = 'fill';
+      } else if (rawTypeLabel.includes('閱讀') || rawTypeLabel.includes('圖表')) {
+        inferredType = 'reading';
+      } else if (
+        !row['選項A'] &&
+        !row['選項B'] &&
+        (correctAns.length > 2 || wrongAns.length > 2)
+      ) {
+        inferredType = /\s/.test(correctAns) && correctAns.length > 15 ? 'translation' : 'fill';
+      }
+
       return {
         id: row['錯題ID'] || `M_${Date.now()}_${idx}`,
         createdAt: row['建立日期'] || new Date().toLocaleDateString('zh-TW'),
         subject: row['科目'] || '綜合科目',
         unit: row['試卷單元'] || row['單元'] || '既有試算表匯入',
         questionNum: String(row['題號'] || idx + 1),
+        questionType: inferredType,
         questionText: qText,
         optA: String(row['選項A'] || ''),
         optB: String(row['選項B'] || ''),
@@ -1225,6 +1243,7 @@ function parseQuestionAndOptionsFromRawText(rawText) {
   }
 
   if (detectedQuestions.length > 0) {
+    setQuestionTypeUI('choice');
     applyParsedQuestionObject(detectedQuestions[0]);
 
     if (detectedQuestions.length > 1 && multiBar && multiBtns) {
@@ -1267,9 +1286,15 @@ function parseQuestionAndOptionsFromRawText(rawText) {
     return;
   }
 
-  // 2. Fallback: Single question without a leading number or with options only
+  // 2. Fallback: Single question with (A)(B)(C)(D) options
   const singleParsed = splitStemAndFourOptions(cleaned);
   if (singleParsed) {
+    const isReadingLike =
+      (singleParsed.stem && singleParsed.stem.length > 140) ||
+      /according to|passage|article|infer|main idea|title|上文|根據本文|圖表|右圖|下圖/i.test(
+        singleParsed.stem
+      );
+    setQuestionTypeUI(isReadingLike ? 'reading' : 'choice');
     if (singleParsed.stem) {
       document.getElementById('fieldQuestionText').value = singleParsed.stem;
     }
@@ -1279,7 +1304,34 @@ function parseQuestionAndOptionsFromRawText(rawText) {
     document.getElementById('fieldOptD').value = singleParsed.optD;
     showToast('✂️ 已自動拆解 (A)(B)(C)(D) 四個選項！');
   } else {
+    // 3. No (A)(B)(C)(D) options found -> Automatically switch to Non-Choice mode (Fill / Calculation vs. Translation)!
     document.getElementById('fieldQuestionText').value = cleaned;
+    document.getElementById('fieldOptA').value = '';
+    document.getElementById('fieldOptB').value = '';
+    document.getElementById('fieldOptC').value = '';
+    document.getElementById('fieldOptD').value = '';
+
+    const qNumMatch = cleaned.match(/^\s*[\(（\[]?(\d{1,3})[\)）\]\.、．\s]/);
+    if (qNumMatch) {
+      document.getElementById('fieldQuestionNum').value = qNumMatch[1];
+      autoFillAnswerFromKeyMap(qNumMatch[1]);
+    }
+
+    const isFillOrCalc =
+      /_{2,}|[a-zA-Z]\s*_{2,}\s*[a-zA-Z]|\([a-zA-Z]+\)|計算|求|等於多少|濃度|速度|加速度|面積|體積|=\s*\?/.test(
+        cleaned
+      );
+    if (isFillOrCalc) {
+      setQuestionTypeUI('fill');
+      showToast(
+        '🔤 偵測為「文意字彙／填充／計算題（非選擇題）」，已自動切換為填空作答模式！'
+      );
+    } else {
+      setQuestionTypeUI('translation');
+      showToast(
+        '✍️ 偵測為「翻譯／簡答／非選題」，已自動隱藏 A/B/C/D 選項，請在 STEP 2 輸入您的寫法與標準解答！'
+      );
+    }
   }
 }
 
@@ -1400,6 +1452,17 @@ function autoFillAnswerFromKeyMap(qNum) {
 // STEP 1C: Automatic Mistake Diagnosis Engine (Zero Typing Needed for Students!)
 // ============================================================================
 function initMistakeForm() {
+  // Question Type Switcher Buttons
+  document
+    .querySelectorAll('#questionTypeContainer .diagnosis-tag')
+    .forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const qType = btn.getAttribute('data-qtype');
+        setQuestionTypeUI(qType);
+        runAutoMistakeDiagnosis(true);
+      });
+    });
+
   // Remove cropped image button
   document.getElementById('btnRemoveCropImg').addEventListener('click', () => {
     setCroppedImagePreview('');
@@ -1409,44 +1472,50 @@ function initMistakeForm() {
   document.getElementById('btnParseRawQuestion').addEventListener('click', () => {
     const raw = document.getElementById('fieldQuestionText').value;
     parseQuestionAndOptionsFromRawText(raw);
-    runAutoMistakeDiagnosis();
-    showToast('✨ 已整理題號與 (A)(B)(C)(D) 選項並更新自動診斷！');
+    runAutoMistakeDiagnosis(true);
+    showToast('✨ 已整理題目格式並更新自動診斷！');
   });
 
   // Auto-lookup standard answer when typing question number
   document.getElementById('fieldQuestionNum').addEventListener('input', (e) => {
     autoFillAnswerFromKeyMap(e.target.value);
-    runAutoMistakeDiagnosis();
+    runAutoMistakeDiagnosis(true);
   });
 
   ['fieldQuestionText', 'fieldOptA', 'fieldOptB', 'fieldOptC', 'fieldOptD', 'fieldSubject'].forEach((id) => {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('input', () => runAutoMistakeDiagnosis());
+    if (el) el.addEventListener('input', () => runAutoMistakeDiagnosis(true));
   });
 
   // Wrong & Correct Option Pills -> Immediately trigger automatic diagnosis!
   document.querySelectorAll('#wrongOptionPills .option-pill').forEach((btn) => {
     btn.addEventListener('click', () => {
       setOptionPillAndInput('wrong', btn.getAttribute('data-val'));
-      runAutoMistakeDiagnosis();
+      runAutoMistakeDiagnosis(true);
     });
   });
 
   document.querySelectorAll('#correctOptionPills .option-pill').forEach((btn) => {
     btn.addEventListener('click', () => {
       setOptionPillAndInput('correct', btn.getAttribute('data-val'));
-      runAutoMistakeDiagnosis();
+      runAutoMistakeDiagnosis(true);
     });
   });
 
   document.getElementById('fieldWrongAnswer').addEventListener('input', (e) => {
-    setOptionPillAndInput('wrong', e.target.value.trim().toUpperCase(), false);
-    runAutoMistakeDiagnosis();
+    const val = e.target.value;
+    if (state.questionType === 'choice' || state.questionType === 'reading') {
+      setOptionPillAndInput('wrong', val.trim().toUpperCase(), false);
+    }
+    runAutoMistakeDiagnosis(true);
   });
 
   document.getElementById('fieldCorrectAnswer').addEventListener('input', (e) => {
-    setOptionPillAndInput('correct', e.target.value.trim().toUpperCase(), false);
-    runAutoMistakeDiagnosis();
+    const val = e.target.value;
+    if (state.questionType === 'choice' || state.questionType === 'reading') {
+      setOptionPillAndInput('correct', val.trim().toUpperCase(), false);
+    }
+    runAutoMistakeDiagnosis(true);
   });
 
   // Error Diagnosis Tags
@@ -1460,7 +1529,7 @@ function initMistakeForm() {
         state.selectedErrorTags.add(tag);
         tagBtn.classList.add('selected');
       }
-      runAutoMistakeDiagnosis();
+      runAutoMistakeDiagnosis(true);
     });
   });
 
@@ -1496,7 +1565,7 @@ function initMistakeForm() {
       if (savedKey) {
         await runGeminiVisionDiagnosis(savedKey);
       } else {
-        showToast('🤖 已根據您的選項與題目自動完成錯因診斷與正確寫法解析！');
+        showToast('🤖 已根據您的題型、答案與科目自動完成錯因診斷與正確寫法解析！');
       }
     });
   }
@@ -1541,6 +1610,63 @@ function initMistakeForm() {
   });
 }
 
+function setQuestionTypeUI(qType) {
+  state.questionType = qType || 'choice';
+  document
+    .querySelectorAll('#questionTypeContainer .diagnosis-tag')
+    .forEach((btn) => {
+      btn.classList.toggle(
+        'selected',
+        btn.getAttribute('data-qtype') === state.questionType
+      );
+    });
+
+  const isChoiceLike =
+    state.questionType === 'choice' || state.questionType === 'reading';
+  const optsGrid = document.getElementById('optionsFourGrid');
+  const wrongPills = document.getElementById('wrongOptionPills');
+  const correctPills = document.getElementById('correctOptionPills');
+  const wrongInput = document.getElementById('fieldWrongAnswer');
+  const correctInput = document.getElementById('fieldCorrectAnswer');
+  const labelWrong = document.getElementById('labelWrongAns');
+  const labelCorrect = document.getElementById('labelCorrectAns');
+  const diffBox = document.getElementById('liveTextDiffBox');
+
+  if (optsGrid) optsGrid.style.display = isChoiceLike ? 'grid' : 'none';
+  if (wrongPills) wrongPills.style.display = isChoiceLike ? 'flex' : 'none';
+  if (correctPills) correctPills.style.display = isChoiceLike ? 'flex' : 'none';
+
+  if (state.questionType === 'translation') {
+    if (labelWrong) labelWrong.textContent = '❌ 我當初寫錯的翻譯／簡答內容';
+    if (labelCorrect) labelCorrect.textContent = '✅ 標準參考翻譯／正確解答';
+    if (wrongInput)
+      wrongInput.placeholder =
+        '請輸入你當時寫的翻譯句子或簡答（例如：It spend the company 3 years...）';
+    if (correctInput)
+      correctInput.placeholder =
+        '請輸入正確的標準翻譯或解答（例如：It took the company three years to...）';
+  } else if (state.questionType === 'fill') {
+    if (labelWrong) labelWrong.textContent = '❌ 我填錯的單字／算錯的答案';
+    if (labelCorrect) labelCorrect.textContent = '✅ 正確單字／標準計算結果';
+    if (wrongInput)
+      wrongInput.placeholder = '例如：拼錯的單字 poison 或算錯的數值 20';
+    if (correctInput)
+      correctInput.placeholder = '例如：正確單字 poisonous 或正確數值 10 m/s';
+  } else if (state.questionType === 'reading') {
+    if (labelWrong) labelWrong.textContent = '❌ 我誤選的閱讀／圖表題選項';
+    if (labelCorrect) labelCorrect.textContent = '✅ 正確答案選項';
+    if (wrongInput) wrongInput.placeholder = '點上方 A/B/C/D 或輸入誤選答案';
+    if (correctInput) correctInput.placeholder = '點上方 A/B/C/D 或輸入正確答案';
+    if (diffBox) diffBox.style.display = 'none';
+  } else {
+    if (labelWrong) labelWrong.textContent = '❌ 我當初選錯的答案';
+    if (labelCorrect) labelCorrect.textContent = '✅ 試卷正確答案';
+    if (wrongInput) wrongInput.placeholder = '點上方 A/B/C/D 或輸入誤選答案';
+    if (correctInput) correctInput.placeholder = '點上方 A/B/C/D 或輸入正確答案';
+    if (diffBox) diffBox.style.display = 'none';
+  }
+}
+
 function setOptionPillAndInput(which, val, updateInput = true) {
   const containerId = which === 'wrong' ? 'wrongOptionPills' : 'correctOptionPills';
   const inputId = which === 'wrong' ? 'fieldWrongAnswer' : 'fieldCorrectAnswer';
@@ -1555,13 +1681,93 @@ function setOptionPillAndInput(which, val, updateInput = true) {
 }
 
 // ============================================================================
-// Built-In Smart Linguistic & Subject Diagnostic Generator
-// Tells the student WHERE they judged wrong and HOW to solve it correctly!
+// Word-by-Word & Token Diff Engine (For Translation, Fill-in-Blank & Science)
+// ============================================================================
+function computeWordDiffAnalysis(wrongStr, correctStr) {
+  const tokenize = (s) =>
+    String(s || '')
+      .trim()
+      .split(/(\s+|[,.;!?，。；！？、]+)/)
+      .filter((t) => t && t.trim());
+
+  const wTokens = tokenize(wrongStr);
+  const cTokens = tokenize(correctStr);
+
+  // LCS matrix for token alignment
+  const m = wTokens.length;
+  const n = cTokens.length;
+  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+
+  const norm = (t) => t.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]/g, '');
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (norm(wTokens[i - 1]) === norm(cTokens[j - 1]) && norm(wTokens[i - 1]) !== '') {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  let i = m;
+  let j = n;
+  const ops = [];
+  while (i > 0 || j > 0) {
+    if (
+      i > 0 &&
+      j > 0 &&
+      norm(wTokens[i - 1]) === norm(cTokens[j - 1]) &&
+      norm(wTokens[i - 1]) !== ''
+    ) {
+      ops.unshift({ type: 'same', w: wTokens[i - 1], c: cTokens[j - 1] });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      ops.unshift({ type: 'add', text: cTokens[j - 1] });
+      j--;
+    } else {
+      ops.unshift({ type: 'del', text: wTokens[i - 1] });
+      i--;
+    }
+  }
+
+  const wrongWords = ops.filter((o) => o.type === 'del').map((o) => o.text);
+  const missingWords = ops.filter((o) => o.type === 'add').map((o) => o.text);
+
+  const htmlParts = ops.map((o) => {
+    if (o.type === 'same') {
+      return `<span>${escapeHtml(o.c)}</span>`;
+    } else if (o.type === 'del') {
+      return `<span style="background:#fee2e2; color:#b91c1c; text-decoration:line-through; padding:1px 5px; border-radius:4px; font-weight:600;">${escapeHtml(
+        o.text
+      )}</span>`;
+    } else {
+      return `<span style="background:#d1fae5; color:#047857; border-bottom:2px solid #10b981; padding:1px 5px; border-radius:4px; font-weight:700;">${escapeHtml(
+        o.text
+      )}</span>`;
+    }
+  });
+
+  return {
+    diffHtml: htmlParts.join(' '),
+    wrongWords,
+    missingWords
+  };
+}
+
+// ============================================================================
+// Multi-Subject & Multi-Question-Type Automatic Diagnostic Engine
+// Supports:
+//  1. ✍️ 翻譯 / 簡答 / 手寫非選題 (Translation & Short Answer)
+//  2. 🔤 文意字彙 / 填充 / 物理・化學・數學・地科計算題 (Fill & Science Calc)
+//  3. 📖 閱讀測驗 / 地理・歷史・公民圖表題組 (Reading & Chart Analysis)
+//  4. 🔘 選擇題 / 克漏字 (All Subjects: 英文、數學、物理、化學、生物、地理、歷史、公民)
 // ============================================================================
 function runAutoMistakeDiagnosis(forceOverwrite = true) {
-  const wrongAns = document.getElementById('fieldWrongAnswer').value.trim().toUpperCase();
-  const correctAns = document.getElementById('fieldCorrectAnswer').value.trim().toUpperCase();
-  const qNum = document.getElementById('fieldQuestionNum').value.trim() || '';
+  const rawWrong = document.getElementById('fieldWrongAnswer').value.trim();
+  const rawCorrect = document.getElementById('fieldCorrectAnswer').value.trim();
+  const subject = document.getElementById('fieldSubject').value.trim() || '綜合科目';
   const stem = document.getElementById('fieldQuestionText').value.trim();
   const opts = {
     A: document.getElementById('fieldOptA').value.trim(),
@@ -1570,120 +1776,273 @@ function runAutoMistakeDiagnosis(forceOverwrite = true) {
     D: document.getElementById('fieldOptD').value.trim()
   };
 
-  if (!wrongAns || !correctAns) {
+  if (!rawWrong || !rawCorrect) {
     return;
   }
 
-  const wrongText = opts[wrongAns] || `選項 (${wrongAns})`;
-  const correctText = opts[correctAns] || `選項 (${correctAns})`;
-  const allOptsJoined = `${opts.A} ${opts.B} ${opts.C} ${opts.D}`.toLowerCase();
+  // Auto-detect if user typed a full word/sentence/number instead of A/B/C/D while still in 'choice' mode
+  const isSingleChoiceLetter = (s) => /^[A-Ea-e]$/.test(s.trim());
+  const hasAnyOptionText = Boolean(opts.A || opts.B || opts.C || opts.D);
+  let effectiveQType = state.questionType;
+
+  if (
+    effectiveQType === 'choice' &&
+    (!isSingleChoiceLetter(rawWrong) || !isSingleChoiceLetter(rawCorrect)) &&
+    !hasAnyOptionText
+  ) {
+    const looksLikeSentence =
+      rawCorrect.split(/\s+/).length >= 3 || rawCorrect.length >= 15;
+    effectiveQType = looksLikeSentence ? 'translation' : 'fill';
+    setQuestionTypeUI(effectiveQType);
+  }
+
+  const diffBox = document.getElementById('liveTextDiffBox');
+  const diffContent = document.getElementById('liveTextDiffContent');
 
   let autoTag = '觀念混淆';
   let whyWrong = '';
   let correctConcept = '';
   let keyTakeaway = '';
 
-  // -------------------------------------------------------------------------
-  // Case 1: 英文關係代名詞 / 關係子句 (that / who / whom / which / whose / where)
-  // -------------------------------------------------------------------------
-  const relPronouns = ['that', 'who', 'whom', 'which', 'whose', 'where', 'when', 'what'];
-  const isRelPronounQ =
-    relPronouns.includes(wrongText.toLowerCase()) ||
-    relPronouns.includes(correctText.toLowerCase());
-
-  if (isRelPronounQ) {
-    autoTag = '文法與詞性判斷';
-    const wLow = wrongText.toLowerCase();
-    const cLow = correctText.toLowerCase();
-
-    const relExplainMap = {
-      that: '「that」雖可代替人或物，但【絕對不能用在逗號 ( , ) 後方的非限定關係子句】，也不能直接放在介系詞後面！',
-      who: '「who」用於先行詞是【人】，且在關係子句中擔任【主詞】（後面緊接動詞，如 have / is / V）！',
-      whom: '「whom」用於先行詞是【人】，且在關係子句中擔任【受詞】（後面會接「主詞＋動詞」）或放在介系詞後！',
-      which: '「which」用於先行詞是【事物／動物】或代表前面整個子句，不能用來指代「人（如 people / students）」！',
-      whose: '「whose」是所有格關代（翻譯為「...的」），後面必須緊接一個【名詞】！'
-    };
-
-    whyWrong = `你選了 (${wrongAns}) ${wrongText}，但正確答案是 (${correctAns}) ${correctText}。\n判斷錯誤點：${
-      relExplainMap[wLow] || `誤判了關係代名詞「${wrongText}」的先行詞或子句結構。`
-    }`;
-
-    correctConcept = `【這題應該這樣寫】：\n1. 先找空格前的「先行詞」是人還是物（若為 people / person 等人，先排除 which）。\n2. 檢查空格前後有沒有「逗號 ,」（若有逗號屬於補述用法，不可選 that）。\n3. 看空格後面緊接的是「動詞」還是「主詞＋動詞」：${
-      relExplainMap[cLow] || `因此此處必須填入 (${correctAns}) ${correctText}。`
-    }`;
-
-    keyTakeaway = `關代秒殺三步驟：①看先行詞(人/物) ②看有無逗號(有逗號禁選 that) ③看後接動詞(選主格 who)還是主詞(選受格 whom)！`;
-  }
-  // -------------------------------------------------------------------------
-  // Case 2: 英文詞性變化題 (e.g., mad / madness / madly / madden, pollute / pollution...)
-  // -------------------------------------------------------------------------
-  else if (isEnglishWordFamilyQuestion(opts)) {
-    autoTag = '文法與詞性判斷';
-    const wPos = guessEnglishPartOfSpeech(wrongText);
-    const cPos = guessEnglishPartOfSpeech(correctText);
-
-    whyWrong = `你選了 (${wrongAns}) ${wrongText}（${wPos}），但此空格在句子結構中需要的詞性是「${cPos}」，所以不能選 (${wrongAns})！`;
-    correctConcept = `【這題應該這樣寫】：\n這題是經典的「詞性判斷題（同字根變化）」！\n1. 觀察空格前後的字詞結構，判斷空格缺的是主詞/受詞（填名詞）、修飾名詞或作受詞補語（填形容詞）、修飾一般動詞/整句（填副詞 -ly），還是助動詞/to 後面（填原形動詞）。\n2. 選項中 (${correctAns}) ${correctText} 為【${cPos}】，完全符合此句型位置需求，故選 (${correctAns})。`;
-    keyTakeaway = `遇到四個選項長得很像的「詞性題」，先看空格前後決定詞性（-ness/-tion 名詞、-ly 副詞、-en/-ize 動詞），不用硬翻整段文章就能秒殺！`;
-  }
-  // -------------------------------------------------------------------------
-  // Case 3: 英文片語、連接詞與常見必考字彙辨析
-  // -------------------------------------------------------------------------
-  else if (isEnglishOptionSet(opts)) {
-    const phraseDict = {
-      'used for': 'be used for + V-ing（被用來做...，主詞通常是物品）',
-      'keen on': 'be keen on + V-ing（熱衷於、喜愛做...）',
-      'tired of': 'be tired of + V-ing（對...感到厭倦、受夠了...）',
-      'amazed by': 'be amazed by（對...感到驚奇讚嘆）',
-      'for a while': 'for a while（持續一小段時間）',
-      'for example': 'for example（舉例來說，用於舉出具體實例）',
-      'in the end': 'in the end（最後、終於，表結果）',
-      'all of a sudden': 'all of a sudden（突然間＝suddenly，表突發狀況）',
-      'go through': 'go through（經歷困難、仔細檢查）',
-      'carry out': 'carry out（執行、實行計畫或命令）',
-      'call on': 'call on（拜訪；呼籲、號召某人做某事）',
-      'come across': 'come across（偶然遇見、無意間發現）',
-      'because': 'because + 完整子句 (S + V)（因為...）',
-      'because of': 'because of + 名詞 / V-ing（因為...，後面絕對不能接完整子句）',
-      'since': 'since（自從...；既然/因為，後接子句）',
-      'once': 'once + 子句（一旦...就...）',
-      'in case': 'in case + 子句（以防萬一...，表事先準備）',
-      'even though': 'even though + 子句（儘管、雖然...，表讓步轉折）',
-      'as soon as': 'as soon as + 子句（一...就...）',
-      'unless': 'unless + 子句（除非...＝if...not）',
-      'infected': 'infected（adj. 受感染的，常搭配 be infected with）',
-      'sensitive': 'sensitive（adj. 敏感的、易受傷害的，常搭配 be sensitive to 對...敏感）',
-      'creative': 'creative（adj. 有創意的）',
-      'plastic': 'plastic（n./adj. 塑膠的）',
-      'distance': 'distance（n. 距離）',
-      'convenience': 'convenience（n. 便利、方便）',
-      'survival': 'survival（n. 生存、存活）',
-      'substance': 'substance（n. 物質、化學物質）'
-    };
-
-    const wMeaning = phraseDict[wrongText.toLowerCase()] || `「${wrongText}」`;
-    const cMeaning = phraseDict[correctText.toLowerCase()] || `「${correctText}」`;
+  // =========================================================================
+  // MODE A: ✍️ 翻譯／造句／簡答非選題 (Translation & Open-Ended Short Answer)
+  // =========================================================================
+  if (effectiveQType === 'translation') {
+    const diffRes = computeWordDiffAnalysis(rawWrong, rawCorrect);
+    if (diffBox && diffContent) {
+      diffBox.style.display = 'block';
+      diffContent.innerHTML = diffRes.diffHtml;
+    }
 
     autoTag = '片語與字彙搭配';
-    whyWrong = `你選了 (${wrongAns}) ${wrongText}，它的意思是 ${wMeaning}。放進本題前後文時，語意邏輯或後面接的詞性搭配不符，因此判斷錯誤。`;
-    correctConcept = `【這題應該這樣寫】：\n1. 先看空格前後的關鍵字與介系詞／子句結構。\n2. 正確答案 (${correctAns}) ${correctText} 的用法為 ${cMeaning}，帶入句中不論是上下文語意還是文法搭配都完全吻合！`;
-    keyTakeaway = `必背對比：誤選的 ${wrongText} vs. 正解 ${cMeaning}，記住後面的介系詞與上下文語氣！`;
+    const wrongPartStr =
+      diffRes.wrongWords.length > 0
+        ? `你寫了「${diffRes.wrongWords.join(' ')}」`
+        : '你的句型結構未完整表達';
+    const rightPartStr =
+      diffRes.missingWords.length > 0
+        ? `標準答案應為「${diffRes.missingWords.join(' ')}」`
+        : `標準寫法為「${rawCorrect}」`;
+
+    // Detect specific English translation pitfalls (tense, spend/take, to V vs V-ing, etc.)
+    const specificNotes = [];
+    if (/\b(take|takes|took)\b/i.test(rawCorrect) && /\bspend|spent|cost\b/i.test(rawWrong)) {
+      specificNotes.push(
+        '混淆了「花費時間」的句型：事物/虛主詞 It 作主詞時要用「It takes/took + 人/組織 + 時間 + to V」（人作主詞才用 spend + 時間 + V-ing）'
+      );
+    }
+    if (/\b(took|was|were|had|did|went|spent|made|found)\b/i.test(rawCorrect) && !/\b(took|was|were|had|did|went|spent|made|found|ed)\b/i.test(rawWrong)) {
+      specificNotes.push('忽略了「過去式時態」：發生在過去的事件，動詞必須改為過去式');
+    }
+    if (/\bto\s+[a-z]+\b/i.test(rawCorrect) && /\b[a-z]+ing\b/i.test(rawWrong)) {
+      specificNotes.push('不定詞 (to + V) 與動名詞 (V-ing) 搭配混淆');
+    }
+
+    whyWrong = `【逐字比對診斷】：${wrongPartStr}，但${rightPartStr}！${
+      specificNotes.length > 0 ? '\n👉 關鍵失分原因：' + specificNotes.join('；') + '。' : '\n👉 關鍵失分原因：關鍵片語搭配、動詞時態或單複數詞形與標準句型有落差。'
+    }`;
+
+    correctConcept = `【這題應該這樣寫】：\n1. 先抓出整句的主詞與動詞時態骨架。\n2. 套用本題核心片語與修飾語：${
+      diffRes.missingWords.length > 0 ? `特別注意「${diffRes.missingWords.join(' ')}」的正確拼法與位置` : '確認介系詞與連接詞位置'
+    }。\n3. 完整正確解答：\n「${rawCorrect}」`;
+
+    keyTakeaway =
+      diffRes.missingWords.length > 0
+        ? `必背關鍵寫法：❌ 勿寫 ${diffRes.wrongWords.join(' ') || '原錯句'} 👉 ✅ 正確應寫「${diffRes.missingWords.join(' ')}」！`
+        : `熟記標準句型：「${rawCorrect}」`;
   }
-  // -------------------------------------------------------------------------
-  // Case 4: 數學、自然科學、社會與各科通用智慧診斷
-  // -------------------------------------------------------------------------
-  else {
-    const isAskWrong = /何者錯誤|何者有誤|不正確|不包括|何者為非/.test(stem);
-    if (isAskWrong) {
-      autoTag = '審題失誤';
-      whyWrong = `這題題幹問的是「何者錯誤／不正確」！你選的 (${wrongAns})「${wrongText}」本身敘述其實是正確的（或你把題目看成選正確選項而誤選）。`;
-      correctConcept = `【這題應該這樣寫】：\n1. 看到題目問「何者錯誤」，先在「錯誤」兩個字下面畫雙底線。\n2. 逐一在 (A)(B)(C)(D) 旁邊標註 ⭕ 或 ❌，其中 (${correctAns})「${correctText}」的敘述違反核心定義，才是本題要找的「錯誤選項」！`;
-      keyTakeaway = `題目問「何者錯誤」時，務必先在選項旁標出 ⭕/❌，最後挑出打 ❌ 的 (${correctAns})！`;
+  // =========================================================================
+  // MODE B: 🔤 文意字彙／填充／物理・化學・數學・地理計算與填空題 (Fill & Calc)
+  // =========================================================================
+  else if (effectiveQType === 'fill') {
+    const diffRes = computeWordDiffAnalysis(rawWrong, rawCorrect);
+    if (diffBox && diffContent) {
+      diffBox.style.display = 'block';
+      diffContent.innerHTML = diffRes.diffHtml;
+    }
+
+    // Check if this is a Numeric / Science / Math Calculation question
+    const wNumMatch = rawWrong.match(/-?\d+(\.\d+)?/);
+    const cNumMatch = rawCorrect.match(/-?\d+(\.\d+)?/);
+    const isNumericCalc =
+      Boolean(wNumMatch && cNumMatch) &&
+      (/數學|物理|化學|自然|地科|地球科學|地理/.test(subject) ||
+        /^[\d\.\-\+\/\*\sA-Za-z%°]+$/.test(rawCorrect));
+
+    if (isNumericCalc) {
+      autoTag = '計算粗心';
+      const wVal = parseFloat(wNumMatch[0]);
+      const cVal = parseFloat(cNumMatch[0]);
+      let mathDiag = '';
+
+      if (cVal !== 0 && Math.abs(wVal + cVal) < 1e-6) {
+        mathDiag = `你算出的數值「${rawWrong}」與正確答案「${rawCorrect}」【正負號剛好相反】！請檢查：是否忽略了向量方向（如減速運動加速度為負、位移方向）、吸熱/放熱正負號，或解方程式移項時忘了變號。`;
+      } else if (cVal !== 0 && (Math.abs(wVal / cVal - 2) < 0.01 || Math.abs(cVal / wVal - 2) < 0.01)) {
+        mathDiag = `你算出的「${rawWrong}」與正解「${rawCorrect}」【剛好相差 2 倍】！常見原因：公式漏乘 1/2（例如動能 Ek = 1/2 mv²、等加速度位移 s = 1/2 at²、三角形面積），或是化學反應式莫耳係數比（1:2）忘了乘除！`;
+      } else if (cVal !== 0 && (Math.abs(wVal / cVal - 3.6) < 0.05 || Math.abs(cVal / wVal - 3.6) < 0.05)) {
+        mathDiag = `你算出的「${rawWrong}」與正解「${rawCorrect}」相差 3.6 倍！這是因為【速率單位 km/h 與 m/s 忘記換算】（1 m/s = 3.6 km/h）！`;
+      } else if (cVal !== 0 && [10, 100, 1000, 0.1, 0.01, 0.001].some((r) => Math.abs(wVal / cVal - r) < 1e-5)) {
+        mathDiag = `你算出的「${rawWrong}」與正解「${rawCorrect}」相差 10 的次方倍！請檢查【單位換算】（例如：cm 與 m、g 與 kg、mL 與 L 換算成莫耳濃度 M）。`;
+      } else {
+        mathDiag = `你算出的結果為「${rawWrong}」，但正確答案應為「${rawCorrect}」。問題出在代入公式時的條件判讀或中間四則運算誤差。`;
+      }
+
+      const sciFormulaGuide = getSubjectFormulaGuidance(subject, stem, rawCorrect);
+      whyWrong = mathDiag;
+      correctConcept = `【這題應該這樣算】：\n${sciFormulaGuide}\n👉 最終正確答案為：${rawCorrect}`;
+      keyTakeaway = `列式後必做 3 檢查：①單位有無換算(m/s、L、kg) ②公式係數(如 1/2)與正負號 ③題目問的最終物理量！`;
     } else {
-      autoTag = '觀念混淆';
-      whyWrong = `你誤選了 (${wrongAns})「${wrongText}」，是因為將它的適用條件與正確答案 (${correctAns})「${correctText}」混淆了（或計算／判讀時忽略了題目給的關鍵限制條件）。`;
-      correctConcept = `【這題應該這樣寫】：\n根據題目條件，正確的推導結果應為 (${correctAns})「${correctText}」。作答時應先圈出題幹關鍵字，排除誘答選項 (${wrongAns})，鎖定 (${correctAns}) 的核心定義。`;
-      keyTakeaway = `區分盲點：❌ (${wrongAns}) ${wrongText.slice(0, 18)} vs. ✅ (${correctAns}) ${correctText.slice(0, 18)}！`;
+      // English Vocabulary Fill-in-the-blank or Word-Form Transformation (e.g. poison -> poisonous, c_____l -> chemical)
+      autoTag = '文法與詞性判斷';
+      const wClean = rawWrong.toLowerCase().trim();
+      const cClean = rawCorrect.toLowerCase().trim();
+
+      // Check if wClean and cClean share the same root (Word family transformation error!)
+      if (wClean.length >= 3 && cClean.length >= 3 && cClean.slice(0, 3) === wClean.slice(0, 3)) {
+        const wPos = guessEnglishPartOfSpeech(wClean);
+        const cPos = guessEnglishPartOfSpeech(cClean);
+        whyWrong = `【詞性與字尾變化錯誤】：你填了「${rawWrong}」（${wPos}），已經抓對字根了！但沒注意到空格在句子結構中需要的是【${cPos}】或是複數形，因此必須變化字尾為「${rawCorrect}」！`;
+        correctConcept = `【這題應該這樣寫】：\n1. 先看空格前後的詞性線索（例如：系動詞 are/is + 副詞 usually 後方要填「形容詞」；所有格 their/its 後方要填「名詞」；助動詞/to 後方填「原形動詞」）。\n2. 將字根變化為正確詞性與單複數：填入「${rawCorrect}」（${cPos}）。`;
+        keyTakeaway = `文意字彙填完後必檢查：①詞性字尾(-ous形容詞 / -tion,-ings名詞 / -ly副詞) ②名詞單複數(-s) ③動詞時態(-ed)！`;
+      } else {
+        whyWrong = `你填寫了「${rawWrong}」，但根據本題前後文語意與首尾字母線索，正確答案應為「${rawCorrect}」（共 ${cClean.length} 個字母，字首 ${cClean[0] || ''}、字尾 ${cClean[cClean.length - 1] || ''}）。`;
+        correctConcept = `【這題應該這樣寫】：\n1. 圈出題幹中的上下文關鍵搭配字（Context Clues）。\n2. 判斷空格所需的詞性（${guessEnglishPartOfSpeech(cClean)}）與正負向語氣，正確單字/答案為：「${rawCorrect}」。`;
+        keyTakeaway = `必背核心字彙／填空：「${rawCorrect}」— 注意其拼字（${cClean}）與前後文搭配！`;
+      }
+    }
+  }
+  // =========================================================================
+  // MODE C: 📖 閱讀測驗／地理・歷史・公民・自然圖表題組 (Reading & Charts)
+  // =========================================================================
+  else if (effectiveQType === 'reading') {
+    if (diffBox) diffBox.style.display = 'none';
+    const wrongAns = rawWrong.toUpperCase();
+    const correctAns = rawCorrect.toUpperCase();
+    const wrongText = opts[wrongAns] || `選項 (${wrongAns})`;
+    const correctText = opts[correctAns] || `選項 (${correctAns})`;
+
+    autoTag = '審題失誤';
+    const isMainIdea = /main idea|title|purpose|best describes|主旨|標題|目的|核心/.test(stem);
+    const isInference = /infer|imply|suggest|conclude|推論|推測|暗示|得知/.test(stem);
+    const isGeoOrChart = /地理|歷史|公民|地球科學|自然|物理|化學/.test(subject) || /圖|表|曲線|座標|氣候|等高線|洋流|人口/.test(stem);
+
+    if (isGeoOrChart) {
+      const geoGuide = getSubjectChartAndConceptGuidance(subject, stem, wrongText, correctText);
+      whyWrong = `你選了 (${wrongAns})「${wrongText}」，在判讀題幹圖表／資料時，誤將局部特徵或相反條件當成結論（${geoGuide.trapReason}）。`;
+      correctConcept = `【這題應該這樣判讀】：\n${geoGuide.howToSolve}\n因此正確答案應選 (${correctAns})「${correctText}」。`;
+      keyTakeaway = geoGuide.takeaway;
+    } else if (isMainIdea) {
+      whyWrong = `【閱讀主旨題診斷】你選了 (${wrongAns})「${wrongText}」，這是閱讀測驗最常見的「以偏概全（太狹隘，只講到某一段的細節）」或「範圍過大」誘答選項！`;
+      correctConcept = `【這題應該這樣找答案】：\n1. 主旨題（Main Idea / Best Title）要看「第一段結尾（Thesis Statement）」與「各段第一句（Topic Sentence）」。\n2. 正確答案 (${correctAns})「${correctText}」才能涵蓋整篇文章的核心主題，而非單一細節！`;
+      keyTakeaway = `閱讀主旨題避坑：只出現在單一段落的細節選項必刪！緊扣首段轉折後與末段總結句！`;
+    } else if (isInference) {
+      whyWrong = `【閱讀推論題診斷】你選了 (${wrongAns})「${wrongText}」，掉入了「過度推論（文章根本沒提到）」或「直接照抄原文單字但扭曲因果關係」的陷阱！`;
+      correctConcept = `【這題應該這樣找答案】：\n1. 推論題（infer / imply）的正確答案，一定是原文某句話的「正向邏輯延伸或同義改寫（Paraphrase）」。\n2. 對照原文線索，只有 (${correctAns})「${correctText}」有明確的上下文證據支持！`;
+      keyTakeaway = `閱讀推論題鐵則：沒講到的不能自己腦補！選項有絕對詞（always/never/all/only）通常有詐！`;
+    } else {
+      whyWrong = `【閱讀細節定位診斷】你選了 (${wrongAns})「${wrongText}」，這個選項雖然出現了文章裡的眼熟單字，但把「主詞／時間／因果關係」張冠李戴了！`;
+      correctConcept = `【這題應該這樣找答案】：\n1. 先從題幹抓出定位關鍵字（人名、地名、專有名詞、轉折詞 However / But / In fact 後面的句子）。\n2. 回到文章對應段落逐字比對：正確答案 (${correctAns})「${correctText}」使用了「同義字替換（Paraphrase）」重述原文重點！`;
+      keyTakeaway = `閱讀測驗秒殺技巧：正解最愛「換句話說（同義字替換）」，完全照抄原文詞彙卻改掉因果的選項是陷阱！`;
+    }
+  }
+  // =========================================================================
+  // MODE D: 🔘 選擇題／克漏字（全科支援：英文、物理、化學、生物、數學、地理、歷史、公民）
+  // =========================================================================
+  else {
+    if (diffBox) diffBox.style.display = 'none';
+    const wrongAns = rawWrong.toUpperCase();
+    const correctAns = rawCorrect.toUpperCase();
+    const wrongText = opts[wrongAns] || `選項 (${wrongAns})`;
+    const correctText = opts[correctAns] || `選項 (${correctAns})`;
+
+    const relPronouns = ['that', 'who', 'whom', 'which', 'whose', 'where', 'when', 'what'];
+    const isRelPronounQ =
+      relPronouns.includes(wrongText.toLowerCase()) ||
+      relPronouns.includes(correctText.toLowerCase());
+
+    if (isRelPronounQ) {
+      autoTag = '文法與詞性判斷';
+      const wLow = wrongText.toLowerCase();
+      const cLow = correctText.toLowerCase();
+      const relExplainMap = {
+        that: '「that」雖可代替人或物，但【絕對不能用在逗號 ( , ) 後方的非限定關係子句】，也不能直接放在介系詞後面！',
+        who: '「who」用於先行詞是【人】，且在關係子句中擔任【主詞】（後面緊接動詞，如 have / is / V）！',
+        whom: '「whom」用於先行詞是【人】，且在關係子句中擔任【受詞】（後面會接「主詞＋動詞」）或放在介系詞後！',
+        which: '「which」用於先行詞是【事物／動物】或代表前面整個子句，不能用來指代「人（如 people / students）」！',
+        whose: '「whose」是所有格關代（翻譯為「...的」），後面必須緊接一個【名詞】！'
+      };
+
+      whyWrong = `你選了 (${wrongAns}) ${wrongText}，但正確答案是 (${correctAns}) ${correctText}。\n判斷錯誤點：${
+        relExplainMap[wLow] || `誤判了關係代名詞「${wrongText}」的先行詞或子句結構。`
+      }`;
+      correctConcept = `【這題應該這樣寫】：\n1. 先找空格前的「先行詞」是人還是物（若為 people / person 等人，先排除 which）。\n2. 檢查空格前後有沒有「逗號 ,」（若有逗號屬於補述用法，不可選 that）。\n3. 看空格後面緊接的是「動詞」還是「主詞＋動詞」：${
+        relExplainMap[cLow] || `因此此處必須填入 (${correctAns}) ${correctText}。`
+      }`;
+      keyTakeaway = `關代秒殺三步驟：①看先行詞(人/物) ②看有無逗號(有逗號禁選 that) ③看後接動詞(選主格 who)還是主詞(選受格 whom)！`;
+    } else if (isEnglishWordFamilyQuestion(opts)) {
+      autoTag = '文法與詞性判斷';
+      const wPos = guessEnglishPartOfSpeech(wrongText);
+      const cPos = guessEnglishPartOfSpeech(correctText);
+      whyWrong = `你選了 (${wrongAns}) ${wrongText}（${wPos}），但此空格在句子結構中需要的詞性是「${cPos}」，所以不能選 (${wrongAns})！`;
+      correctConcept = `【這題應該這樣寫】：\n這題是經典的「詞性判斷題（同字根變化）」！\n1. 觀察空格前後的字詞結構，判斷空格缺的是主詞/受詞（填名詞）、修飾名詞或作受詞補語（填形容詞）、修飾一般動詞/整句（填副詞 -ly），還是助動詞/to 後面（填原形動詞）。\n2. 選項中 (${correctAns}) ${correctText} 為【${cPos}】，完全符合此句型位置需求，故選 (${correctAns})。`;
+      keyTakeaway = `遇到四個選項長得很像的「詞性題」，先看空格前後決定詞性（-ness/-tion 名詞、-ly 副詞、-en/-ize 動詞），不用硬翻整段文章就能秒殺！`;
+    } else if (isEnglishOptionSet(opts)) {
+      const phraseDict = {
+        'used for': 'be used for + V-ing（被用來做...，主詞通常是物品）',
+        'keen on': 'be keen on + V-ing（熱衷於、喜愛做...）',
+        'tired of': 'be tired of + V-ing（對...感到厭倦、受夠了...）',
+        'amazed by': 'be amazed by（對...感到驚奇讚嘆）',
+        'for a while': 'for a while（持續一小段時間）',
+        'for example': 'for example（舉例來說，用於舉出具體實例）',
+        'in the end': 'in the end（最後、終於，表結果）',
+        'all of a sudden': 'all of a sudden（突然間＝suddenly，表突發狀況）',
+        'go through': 'go through（經歷困難、仔細檢查）',
+        'carry out': 'carry out（執行、實行計畫或命令）',
+        'call on': 'call on（拜訪；呼籲、號召某人做某事）',
+        'come across': 'come across（偶然遇見、無意間發現）',
+        'because': 'because + 完整子句 (S + V)（因為...）',
+        'because of': 'because of + 名詞 / V-ing（因為...，後面絕對不能接完整子句）',
+        'since': 'since（自從...；既然/因為，後接子句）',
+        'once': 'once + 子句（一旦...就...）',
+        'in case': 'in case + 子句（以防萬一...，表事先準備）',
+        'even though': 'even though + 子句（儘管、雖然...，表讓步轉折）',
+        'as soon as': 'as soon as + 子句（一...就...）',
+        'unless': 'unless + 子句（除非...＝if...not）',
+        'infected': 'infected（adj. 受感染的，常搭配 be infected with）',
+        'sensitive': 'sensitive（adj. 敏感的、易受傷害的，常搭配 be sensitive to 對...敏感）',
+        'creative': 'creative（adj. 有創意的）',
+        'plastic': 'plastic（n./adj. 塑膠的）',
+        'distance': 'distance（n. 距離）',
+        'convenience': 'convenience（n. 便利、方便）',
+        'survival': 'survival（n. 生存、存活）',
+        'substance': 'substance（n. 物質、化學物質）'
+      };
+      const wMeaning = phraseDict[wrongText.toLowerCase()] || `「${wrongText}」`;
+      const cMeaning = phraseDict[correctText.toLowerCase()] || `「${correctText}」`;
+      autoTag = '片語與字彙搭配';
+      whyWrong = `你選了 (${wrongAns}) ${wrongText}，它的意思是 ${wMeaning}。放進本題前後文時，語意邏輯或後面接的詞性搭配不符，因此判斷錯誤。`;
+      correctConcept = `【這題應該這樣寫】：\n1. 先看空格前後的關鍵字與介系詞／子句結構。\n2. 正確答案 (${correctAns}) ${correctText} 的用法為 ${cMeaning}，帶入句中不論是上下文語意還是文法搭配都完全吻合！`;
+      keyTakeaway = `必背對比：誤選的 ${wrongText} vs. 正解 ${cMeaning}，記住後面的介系詞與上下文語氣！`;
+    } else {
+      // Multi-Subject Analyzer for Physics, Chemistry, Biology, Earth Science, Math, Geography, History, Civics!
+      const subjGuide = getSubjectChartAndConceptGuidance(
+        subject,
+        `${stem} ${wrongText} ${correctText}`,
+        wrongText,
+        correctText
+      );
+      const isAskWrong = /何者錯誤|何者有誤|不正確|不包括|何者為非/.test(stem);
+      if (isAskWrong) {
+        autoTag = '審題失誤';
+        whyWrong = `這題題幹問的是「何者錯誤／不正確」！你選的 (${wrongAns})「${wrongText}」本身敘述其實是正確的（或你沒注意到題目要選錯的）。\n${subjGuide.trapReason}`;
+        correctConcept = `【這題應該這樣解】：\n1. 看到「何者錯誤」先畫雙底線，逐一在 (A)(B)(C)(D) 旁標註 ⭕ 或 ❌。\n2. ${subjGuide.howToSolve}\n3. 因此敘述有誤、應選的答案為 (${correctAns})「${correctText}」！`;
+        keyTakeaway = `問「何者錯誤」先標 ⭕/❌！${subjGuide.takeaway}`;
+      } else {
+        autoTag = '觀念混淆';
+        whyWrong = `你誤選了 (${wrongAns})「${wrongText}」。\n👉 判斷錯誤點：${subjGuide.trapReason}`;
+        correctConcept = `【這題應該這樣解】：\n${subjGuide.howToSolve}\n👉 因此正確答案應選 (${correctAns})「${correctText}」。`;
+        keyTakeaway = subjGuide.takeaway;
+      }
     }
   }
 
@@ -1710,8 +2069,87 @@ function runAutoMistakeDiagnosis(forceOverwrite = true) {
 
   const badge = document.getElementById('autoDiagnosisStatusBadge');
   if (badge) {
-    badge.textContent = `🤖 已根據「誤選 (${wrongAns}) vs 正解 (${correctAns})」自動產生錯因診斷與正確解法！（看完即可直接儲存）`;
+    badge.textContent = `🤖 已根據【${subject}・${getQuestionTypeLabel(
+      effectiveQType
+    )}】自動分析錯因與正確寫法！（看完即可直接儲存）`;
   }
+}
+
+function getQuestionTypeLabel(qType) {
+  const map = {
+    choice: '選擇／克漏字',
+    translation: '翻譯／簡答非選題',
+    fill: '填充／文意字彙／計算題',
+    reading: '閱讀測驗／圖表題組'
+  };
+  return map[qType] || '選擇題';
+}
+
+// Subject-Specific Formula & Concept Knowledge Base (Physics, Chemistry, Math, Geography, History, Biology...)
+function getSubjectFormulaGuidance(subject, stem, correctAns) {
+  const text = `${subject} ${stem} ${correctAns}`;
+  if (/加速度|速度|位移|煞車|自由落體|等加速|v-t/.test(text)) {
+    return '1. 先確認初速度 (v₀)、末速度 (v)、加速度 (a) 與時間 (t) 的方向（減速時 a 與 v 反向）。\n2. 套用等加速度三大公式：v = v₀ + at、s = v₀t + 1/2 at²、v² = v₀² + 2as（或利用 v-t 圖斜率求加速度、面積求位移）。';
+  }
+  if (/力|牛頓|摩擦|質量|F\s*=|重量/.test(text)) {
+    return '1. 先畫出物體的「力圖（Free-body diagram）」，標出重力、正向力、外力與摩擦力。\n2. 套用牛頓第二運動定律 ΣF = ma（注意必須是「合力」而非單一外力；等速運動時合力為 0）。';
+  }
+  if (/功|動能|位能|功率|焦耳|能量/.test(text)) {
+    return '1. 確認外力方向與位移方向夾角（W = F·s·cosθ，垂直時作功為 0）。\n2. 套用功能定理（合力作功＝動能變化 ΔEk = 1/2 mv² - 1/2 mv₀²）或力學能守恆（Ek + U = 定值）。';
+  }
+  if (/電流|電壓|電阻|歐姆|串聯|並聯|電功率/.test(text)) {
+    return '1. 先判別電路是「串聯（電流 I 相同，電阻相加）」還是「並聯（電壓 V 相同，電阻倒數相加）」。\n2. 套用歐姆定律 V = I × R 與電功率公式 P = I·V = I²R = V²/R。';
+  }
+  if (/莫耳|濃度|化學|分子量|反應式|係數|pH|酸|鹼|氧化|還原/.test(text)) {
+    return '1. 先將質量換成莫耳數（n = W / M，或由體積乘以莫耳濃度 n = C_M × V(公升)）。\n2. 列出平衡後的化學反應式，利用「係數比＝反應莫耳數比」（注意誰是限量試劑）求出產物或目標濃度。';
+  }
+  if (/氣候|雨量|氣溫|風帶|洋流|等高線|地形|經緯|時區|人口|產業/.test(text)) {
+    return '1. 【地理判讀三步驟】：先看座標軸／圖例單位（如最冷月均溫決定熱帶>18°C、溫帶-3~18°C；最高溫在1月為南半球、7月為北半球）。\n2. 結合緯度、海陸位置、行星風帶（信風/西風/副熱帶高壓）或地形迎風/背風坡進行綜合推導。';
+  }
+  return '1. 先圈出題幹給定的已知數據與單位（若有非標準單位先換算）。\n2. 寫出該單元核心公式，將已知數代入求解，並檢查正負號與倍數關係。';
+}
+
+function getSubjectChartAndConceptGuidance(subject, text, wrongText, correctText) {
+  if (/物理|理化/.test(subject) || /加速度|速度|力|功|電|波|折射|透鏡|浮力|壓力/.test(text)) {
+    return {
+      trapReason: `在物理觀念上，誤把「${wrongText}」成立的特定條件當成通則（例如混淆了速度與加速度方向、靜摩擦與動摩擦、或未考慮合力是否為零）。`,
+      howToSolve: `1. 先確認物理量的定義（向量需同時看大小與方向，如減速時 a 與 v 反向；轉彎時必有向心加速度）。\n2. 列出對應定律（如 F=ma、P=F/A、浮力 B=V_排×d_液），即可驗證「${correctText}」才符合題意。`,
+      takeaway: `物理避坑：①向量必看方向(正負號) ②等速＝合力為零 ③看清圖表縱軸是 x 還是 v！`
+    };
+  }
+  if (/化學/.test(subject) || /莫耳|原子|離子|酸鹼|氧化|還原|電解|有機|酯|反應速率|平衡/.test(text)) {
+    return {
+      trapReason: `在化學概念上，把「${wrongText}」與「${correctText}」的反應條件、粒子數／莫耳數比或酸鹼／氧化還原定義記顛倒了。`,
+      howToSolve: `1. 檢查化學反應式係數與粒子狀態（分子 vs. 原子 vs. 離子，是否完全解離）。\n2. 依據勒沙特列原理／莫耳計量／氧化數變化，推導出「${correctText}」。`,
+      takeaway: `化學避坑：①係數比＝莫耳數比＝氣體體積比（非質量比！） ②看清問的是分子數還是原子總數！`
+    };
+  }
+  if (/地理/.test(subject) || /氣候|季風|洋流|等高線|地形|冰河|石灰岩|都市|農業|工業|人口|GIS/.test(text)) {
+    return {
+      trapReason: `在地理空間與圖表判讀上，誤判了「${wrongText}」所屬的氣候帶／地形特徵／區位條件（例如沒注意南北半球月份相反、迎風坡與背風坡、或等高線彎曲方向）。`,
+      howToSolve: `1. 先從題幹或圖表抓出「空間定位線索（緯度、海陸位置、最冷月均溫、雨季分布或等高線數值）」。\n2. 對照地理成因（行星風系／洋流性質／地形作用力／產業區位要素），即可鎖定「${correctText}」。`,
+      takeaway: `地理秒殺口訣：先定半球（7月熱北、1月熱南）➔ 二看溫雨定氣候 ➔ 等高線凸向高處為山谷(發源河流)！`
+    };
+  }
+  if (/生物|地科|地球科學/.test(subject) || /細胞|酵素|遺傳|染色體|生態|板塊|斷層|氣團|鋒面|星等|潮汐/.test(text)) {
+    return {
+      trapReason: `將「${wrongText}」與「${correctText}」的构造功能、作用階段或地質／天文週期特徵搞混了。`,
+      howToSolve: `1. 先釐清題目問的對象層次（如胞器功能、減數分裂 vs. 細胞分裂、冷鋒 vs. 暖鋒、朔望月位置）。\n2. 逐一比對定義特徵，唯有「${correctText}」完全吻合。`,
+      takeaway: `生科／地科重點：善用對比表格記憶相似名詞（發電廠＝粒線體、冷鋒＝鋒後降雨、逆斷層＝受擠壓）！`
+    };
+  }
+  if (/歷史|公民/.test(subject)) {
+    return {
+      trapReason: `受「${wrongText}」字面敘述吸引，但忽略了題幹的時代背景時間軸（歷史）或法定構成要件／救濟程序（公民）。`,
+      howToSolve: `1. 先圈出題幹中的時代關鍵字／制度名稱或法律行為主體。\n2. 排除時代不符或權責機關錯誤的「${wrongText}」，選出符合史實／法理的「${correctText}」。`,
+      takeaway: `社會科解題關鍵：先抓題幹「時間／空間／主體關鍵字」，切勿只看選項本身通順就選！`
+    };
+  }
+  return {
+    trapReason: `將「${wrongText}」的適用條件與正確答案「${correctText}」混淆，或忽略了題幹中的關鍵限定詞。`,
+    howToSolve: `1. 先圈出題幹的核心條件與問題焦點。\n2. 對照「${wrongText}」與「${correctText}」的差異，確認只有「${correctText}」完全符合定義與題意。`,
+    takeaway: `熟記核心差異：❌ 誤區「${wrongText.slice(0, 18)}」 vs. ✅ 正解「${correctText.slice(0, 18)}」！`
+  };
 }
 
 function isEnglishOptionSet(opts) {
@@ -1732,7 +2170,7 @@ function isEnglishWordFamilyQuestion(opts) {
 
 function guessEnglishPartOfSpeech(word) {
   const w = word.trim().toLowerCase();
-  if (/(ness|tion|sion|ment|ity|ance|ence|ship|ist|er|or|ant)$/.test(w)) {
+  if (/(ness|tion|sion|ment|ity|ance|ence|ship|ist|er|or|ant|ings)$/.test(w)) {
     return '名詞 (n.)';
   }
   if (/ly$/.test(w)) {
@@ -1749,8 +2187,9 @@ function guessEnglishPartOfSpeech(word) {
 
 // Optional Gemini Vision Deep Analysis (if user entered Gemini API Key)
 async function runGeminiVisionDiagnosis(apiKey) {
-  const wrongAns = document.getElementById('fieldWrongAnswer').value.trim().toUpperCase();
-  const correctAns = document.getElementById('fieldCorrectAnswer').value.trim().toUpperCase();
+  const wrongAns = document.getElementById('fieldWrongAnswer').value.trim();
+  const correctAns = document.getElementById('fieldCorrectAnswer').value.trim();
+  const subject = document.getElementById('fieldSubject').value.trim();
   const qNum = document.getElementById('fieldQuestionNum').value.trim();
   const stem = document.getElementById('fieldQuestionText').value.trim();
   const opts = {
@@ -1761,29 +2200,28 @@ async function runGeminiVisionDiagnosis(apiKey) {
   };
 
   if (!wrongAns || !correctAns) {
-    alert('請先在 STEP 2 選擇「我選錯的答案」與「試卷正確答案」！');
+    alert('請先在 STEP 2 輸入「我的錯誤答案／寫法」與「試卷正確答案」！');
     return;
   }
 
   const badge = document.getElementById('autoDiagnosisStatusBadge');
-  if (badge) badge.textContent = '⏳ 正在透過 AI 視覺與題目深度分析您的錯因...';
+  if (badge) badge.textContent = '⏳ 正在透過 AI 視覺與學科專家引擎深度分析您的錯因...';
 
   try {
     const parts = [
       {
-        text: `你是一位溫柔且極具教學經驗的中學名師。學生在試卷第 ${qNum || '?'} 題選了錯誤答案 (${wrongAns})，但正確答案是 (${correctAns})。
+        text: `你是一位極具教學經驗的「${subject}」名師。
+本題題型：${getQuestionTypeLabel(state.questionType)}（題號：${qNum || '?'}）
+學生當初寫錯／選錯的答案：「${wrongAns}」
+標準正確答案：「${correctAns}」
 目前題目文字：${stem}
-選項：(A) ${opts.A} (B) ${opts.B} (C) ${opts.C} (D) ${opts.D}
+選項（若為選擇題）：(A) ${opts.A} (B) ${opts.B} (C) ${opts.C} (D) ${opts.D}
 請根據題目文字與附圖（若有），回傳純 JSON 格式（不要加 markdown 標籤）：
 {
-  "questionText": "若附圖中有更完整的題目或克漏字句子，請補全題目文字，否則回傳原題目",
-  "optA": "選項A文字",
-  "optB": "選項B文字",
-  "optC": "選項C文字",
-  "optD": "選項D文字",
-  "whyWrong": "直接告訴學生他選 (${wrongAns}) 判斷錯誤的地方在哪裡（簡明扼要 2 句話內）",
-  "correctConcept": "告訴學生這一題應該怎麼看、怎麼寫才正確（清楚步驟 2~3 句話）",
-  "keyTakeaway": "給學生的一句話秒殺記憶口訣"
+  "questionText": "若附圖中有更完整的題目或句子，請補全題目文字，否則回傳原題目",
+  "whyWrong": "直接告訴學生他的答案「${wrongAns}」判斷或書寫錯誤的地方在哪裡（具體指出錯字、文法、公式、圖表判讀或觀念誤區，2~3句話）",
+  "correctConcept": "告訴學生這一題應該怎麼看、怎麼寫／怎麼算才正確（清楚步驟 2~3 句話）",
+  "keyTakeaway": "給學生的一句話秒殺記憶口訣或公式提醒"
 }`
       }
     ];
@@ -1816,11 +2254,6 @@ async function runGeminiVisionDiagnosis(apiKey) {
       if (parsed.questionText && parsed.questionText.length > 5) {
         document.getElementById('fieldQuestionText').value = parsed.questionText;
       }
-      if (parsed.optA && !opts.A) document.getElementById('fieldOptA').value = parsed.optA;
-      if (parsed.optB && !opts.B) document.getElementById('fieldOptB').value = parsed.optB;
-      if (parsed.optC && !opts.C) document.getElementById('fieldOptC').value = parsed.optC;
-      if (parsed.optD && !opts.D) document.getElementById('fieldOptD').value = parsed.optD;
-
       if (parsed.whyWrong) {
         document.getElementById('fieldWhyWrong').value = parsed.whyWrong;
         document.getElementById('previewWhyWrong').textContent = parsed.whyWrong;
@@ -1834,11 +2267,11 @@ async function runGeminiVisionDiagnosis(apiKey) {
         document.getElementById('previewKeyTakeaway').textContent = parsed.keyTakeaway;
       }
       if (badge) badge.textContent = '✨ AI 視覺深度診斷完成！';
-      showToast('✨ AI 已根據題目截圖與您的選擇完成深度診斷！');
+      showToast('✨ AI 已根據題目截圖與您的答案完成深度診斷！');
     }
   } catch (err) {
     console.warn('Gemini Vision API fallback to built-in analyzer:', err);
-    if (badge) badge.textContent = '🤖 已使用內建智慧題型診斷引擎完成分析！';
+    if (badge) badge.textContent = '🤖 已使用內建跨學科智慧診斷引擎完成分析！';
   }
 }
 
@@ -1851,11 +2284,16 @@ function saveCurrentMistakeForm(silentRedirect = false) {
   const optB = document.getElementById('fieldOptB').value.trim();
   const optC = document.getElementById('fieldOptC').value.trim();
   const optD = document.getElementById('fieldOptD').value.trim();
-  const wrongAnswer = document.getElementById('fieldWrongAnswer').value.trim().toUpperCase();
-  const correctAnswer = document.getElementById('fieldCorrectAnswer').value.trim().toUpperCase();
+  const isChoiceLike = state.questionType === 'choice' || state.questionType === 'reading';
+  const wrongAnswer = isChoiceLike
+    ? document.getElementById('fieldWrongAnswer').value.trim().toUpperCase()
+    : document.getElementById('fieldWrongAnswer').value.trim();
+  const correctAnswer = isChoiceLike
+    ? document.getElementById('fieldCorrectAnswer').value.trim().toUpperCase()
+    : document.getElementById('fieldCorrectAnswer').value.trim();
 
   if (!wrongAnswer || !correctAnswer) {
-    alert('請在 STEP 2 點選「❌ 我當初選錯的答案」與「✅ 試卷正確答案」！');
+    alert('請在 STEP 2 輸入「❌ 我當初的錯誤答案／寫法」與「✅ 試卷正確答案」！');
     return false;
   }
 
@@ -1871,22 +2309,23 @@ function saveCurrentMistakeForm(silentRedirect = false) {
   const errorTags =
     state.selectedErrorTags.size > 0
       ? Array.from(state.selectedErrorTags)
-      : ['觀念混淆'];
+      : [getQuestionTypeLabel(state.questionType)];
 
   const editingId = document.getElementById('editingMistakeId').value;
 
   const mistakeRecord = {
     id: editingId || `M_${Date.now()}`,
     createdAt: new Date().toLocaleDateString('zh-TW'),
+    questionType: state.questionType || 'choice',
     subject,
     unit,
     questionNum,
     questionText:
-      questionText || `第 ${questionNum} 題（請參照試卷截圖上下文選出正確選項）`,
-    optA,
-    optB,
-    optC,
-    optD,
+      questionText || `第 ${questionNum} 題（請參照試卷截圖作答）`,
+    optA: isChoiceLike ? optA : '',
+    optB: isChoiceLike ? optB : '',
+    optC: isChoiceLike ? optC : '',
+    optD: isChoiceLike ? optD : '',
     wrongAnswer,
     correctAnswer,
     errorTags,
@@ -1929,6 +2368,7 @@ function resetMistakeForm(keepMetadata = false) {
   if (!keepMetadata) {
     document.getElementById('fieldSubject').value = '英文';
     document.getElementById('fieldUnit').value = '段考複習卷';
+    setQuestionTypeUI('choice');
   }
   document.getElementById('fieldQuestionNum').value = '';
   document.getElementById('fieldQuestionText').value = '';
@@ -1943,11 +2383,13 @@ function resetMistakeForm(keepMetadata = false) {
   document.getElementById('fieldCorrectConcept').value = '';
   document.getElementById('fieldKeyTakeaway').value = '';
   document.getElementById('previewWhyWrong').textContent =
-    '請先在 STEP 2 點選「我選錯的答案」與「正確答案」...';
+    '請先在 STEP 2 輸入「我的錯誤答案／寫法」與「正確答案」...';
   document.getElementById('previewCorrectConcept').textContent =
-    '系統將根據題目與正確選項自動為你解析...';
+    '系統將根據題型、科目與正確答案自動為你解析...';
   document.getElementById('previewKeyTakeaway').textContent =
     '自動產生重點提醒...';
+  const diffBox = document.getElementById('liveTextDiffBox');
+  if (diffBox) diffBox.style.display = 'none';
   const multiBar = document.getElementById('multiQuestionSelectorBar');
   if (multiBar) multiBar.style.display = 'none';
   setCroppedImagePreview('');
@@ -2218,6 +2660,7 @@ window.editMistakeById = function (id) {
   document.getElementById('fieldOptB').value = m.optB || '';
   document.getElementById('fieldOptC').value = m.optC || '';
   document.getElementById('fieldOptD').value = m.optD || '';
+  setQuestionTypeUI(m.questionType || 'choice');
   setOptionPillAndInput('wrong', m.wrongAnswer);
   setOptionPillAndInput('correct', m.correctAnswer);
   document.getElementById('fieldWhyWrong').value = m.whyWrong;
@@ -2273,6 +2716,34 @@ function initPracticeQuizTab() {
     const hintBox = document.getElementById('quizHintBox');
     hintBox.style.display = hintBox.style.display === 'none' ? 'block' : 'none';
   });
+
+  const btnSkeleton = document.getElementById('btnShowSkeletonHint');
+  if (btnSkeleton) {
+    btnSkeleton.addEventListener('click', () => {
+      const m = state.quizQueue[state.quizIndex];
+      if (!m) return;
+      const hintSpan = document.getElementById('quizSkeletonHintText');
+      if (!hintSpan) return;
+      const ans = String(m.correctAnswer || '').trim();
+      const tokens = ans.split(/\s+/).filter(Boolean);
+      if (tokens.length >= 2) {
+        // Sentence / phrase skeleton: show first letter of content words
+        const skel = tokens
+          .map((w, i) => {
+            if (i === 0 || w.length <= 2) return w;
+            const clean = w.replace(/[^A-Za-z0-9]/g, '');
+            const punc = w.slice(clean.length);
+            return clean[0] + '_'.repeat(Math.min(clean.length - 1, 5)) + punc;
+          })
+          .join(' ');
+        hintSpan.textContent = `🔤 句型骨架提示（共 ${tokens.length} 字）：${skel}`;
+      } else if (/^[A-Za-z-]+$/.test(ans) && ans.length >= 3) {
+        hintSpan.textContent = `🔤 字彙提示：字首 ${ans[0]}... 字尾 ...${ans[ans.length - 1]}（共 ${ans.length} 個字母）`;
+      } else {
+        hintSpan.textContent = `💡 答案長度約 ${ans.length} 個字元，開頭為「${ans.slice(0, 2)}...」`;
+      }
+    });
+  }
 
   document
     .getElementById('btnSubmitQuizAnswer')
@@ -2344,18 +2815,32 @@ function startPracticeQuiz(customList = null) {
   renderCurrentQuizQuestion();
 }
 
+function isNonChoiceQuizQuestion(m) {
+  if (m.questionType === 'translation' || m.questionType === 'fill') {
+    return true;
+  }
+  const stdKeys = ['A', 'B', 'C', 'D', 'E'];
+  const cUp = String(m.correctAnswer || '').trim().toUpperCase();
+  const hasOpts = Boolean(m.optA || m.optB || m.optC || m.optD);
+  if (!hasOpts && !stdKeys.includes(cUp)) {
+    return true;
+  }
+  return false;
+}
+
 function renderCurrentQuizQuestion() {
   const m = state.quizQueue[state.quizIndex];
   state.quizSelectedOptKey = null;
   state.quizSelectedConceptIdx = null;
   state.quizSubmitted = false;
 
+  const qTypeBadge = getQuestionTypeLabel(m.questionType);
   document.getElementById('quizProgressBadge').textContent = `第 ${
     state.quizIndex + 1
   } / ${state.quizQueue.length} 題`;
   document.getElementById(
     'quizSubjectTitle'
-  ).textContent = `${m.subject}｜${m.unit}（原題號：第 ${m.questionNum} 題）`;
+  ).textContent = `${m.subject}｜${m.unit}（第 ${m.questionNum} 題・${qTypeBadge}）`;
 
   document.getElementById('quizErrorTagsBanner').textContent = `⚠️ 上次錯因紀錄：${m.errorTags.join('、')}`;
 
@@ -2375,64 +2860,87 @@ function renderCurrentQuizQuestion() {
 
   document.getElementById('quizQuestionStem').textContent = m.questionText;
 
-  // Prepare Options (with optional anti-rote-memorization shuffling)
-  const shuffleOpts = document.getElementById('chkShuffleOptions').checked;
-  const hasOptionText = Boolean(m.optA || m.optB || m.optC || m.optD);
-
-  let renderedOptions = [
-    { origKey: 'A', text: m.optA || '選項 (A)' },
-    { origKey: 'B', text: m.optB || '選項 (B)' },
-    { origKey: 'C', text: m.optC || '選項 (C)' },
-    { origKey: 'D', text: m.optD || '選項 (D)' }
-  ];
-
-  // If student entered a non-ABCD answer (e.g., E or fill-in-the-blank text), include it seamlessly
-  const stdKeys = ['A', 'B', 'C', 'D'];
-  if (
-    !stdKeys.includes(m.correctAnswer.toUpperCase()) ||
-    !stdKeys.includes(m.wrongAnswer.toUpperCase())
-  ) {
-    renderedOptions = [
-      { origKey: m.correctAnswer, text: m.correctAnswer },
-      { origKey: m.wrongAnswer, text: m.wrongAnswer }
-    ];
-    if (m.optA) renderedOptions.push({ origKey: 'A', text: m.optA });
-    if (m.optB) renderedOptions.push({ origKey: 'B', text: m.optB });
-  }
-
-  if (shuffleOpts && (hasOptionText || renderedOptions.length !== 4)) {
-    renderedOptions.sort(() => Math.random() - 0.5);
-  }
-
-  const displayLabels = ['A', 'B', 'C', 'D'];
   const optionsContainer = document.getElementById('quizOptionsContainer');
-  optionsContainer.innerHTML = renderedOptions
-    .map((opt, idx) => {
-      const dispLetter = displayLabels[idx];
-      const note =
-        shuffleOpts && hasOptionText ? '（選項順序已隨機洗牌）' : '';
-      return `
-        <button type="button" class="quiz-option-btn" data-orig-key="${opt.origKey}">
-          <span style="width:30px; height:30px; border-radius:50%; background:#e2e8f0; display:inline-flex; align-items:center; justify-content:center; font-weight:700;">
-            ${dispLetter}
-          </span>
-          <span style="flex:1;">${escapeHtml(opt.text)}</span>
-          <span style="font-size:0.75rem; color:#94a3b8;">${note}</span>
-        </button>
-      `;
-    })
-    .join('');
+  const textInputContainer = document.getElementById('quizTextInputContainer');
+  const typedInput = document.getElementById('quizUserTypedAnswer');
+  const skelHintSpan = document.getElementById('quizSkeletonHintText');
 
-  optionsContainer.querySelectorAll('.quiz-option-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (state.quizSubmitted) return;
-      state.quizSelectedOptKey = btn.getAttribute('data-orig-key');
-      optionsContainer
-        .querySelectorAll('.quiz-option-btn')
-        .forEach((b) => b.classList.remove('selected'));
-      btn.classList.add('selected');
+  const useTextInputMode = isNonChoiceQuizQuestion(m);
+
+  if (useTextInputMode && textInputContainer && typedInput) {
+    optionsContainer.style.display = 'none';
+    textInputContainer.style.display = 'block';
+    typedInput.value = '';
+    typedInput.disabled = false;
+    if (skelHintSpan) skelHintSpan.textContent = '';
+    const promptLbl = document.getElementById('quizTextInputPromptLabel');
+    if (promptLbl) {
+      promptLbl.textContent =
+        m.questionType === 'translation'
+          ? '✍️ 請輸入您的翻譯／非選題完整作答（支援智慧字詞比對）：'
+          : '🔤 請輸入您的填充／字彙／計算答案（不必死背選項，直接作答）：';
+    }
+  } else {
+    if (textInputContainer) textInputContainer.style.display = 'none';
+    optionsContainer.style.display = 'grid';
+
+    // Prepare Options (with optional anti-rote-memorization shuffling)
+    const shuffleOpts = document.getElementById('chkShuffleOptions').checked;
+    const hasOptionText = Boolean(m.optA || m.optB || m.optC || m.optD);
+
+    let renderedOptions = [
+      { origKey: 'A', text: m.optA || '選項 (A)' },
+      { origKey: 'B', text: m.optB || '選項 (B)' },
+      { origKey: 'C', text: m.optC || '選項 (C)' },
+      { origKey: 'D', text: m.optD || '選項 (D)' }
+    ];
+
+    const stdKeys = ['A', 'B', 'C', 'D'];
+    if (
+      !stdKeys.includes(m.correctAnswer.toUpperCase()) ||
+      !stdKeys.includes(m.wrongAnswer.toUpperCase())
+    ) {
+      renderedOptions = [
+        { origKey: m.correctAnswer, text: m.correctAnswer },
+        { origKey: m.wrongAnswer, text: m.wrongAnswer }
+      ];
+      if (m.optA) renderedOptions.push({ origKey: 'A', text: m.optA });
+      if (m.optB) renderedOptions.push({ origKey: 'B', text: m.optB });
+    }
+
+    if (shuffleOpts && (hasOptionText || renderedOptions.length !== 4)) {
+      renderedOptions.sort(() => Math.random() - 0.5);
+    }
+
+    const displayLabels = ['A', 'B', 'C', 'D'];
+    optionsContainer.innerHTML = renderedOptions
+      .map((opt, idx) => {
+        const dispLetter = displayLabels[idx] || String(idx + 1);
+        const note =
+          shuffleOpts && hasOptionText ? '（選項順序已隨機洗牌）' : '';
+        return `
+          <button type="button" class="quiz-option-btn" data-orig-key="${escapeHtml(opt.origKey)}">
+            <span style="width:30px; height:30px; border-radius:50%; background:#e2e8f0; display:inline-flex; align-items:center; justify-content:center; font-weight:700;">
+              ${dispLetter}
+            </span>
+            <span style="flex:1;">${escapeHtml(opt.text)}</span>
+            <span style="font-size:0.75rem; color:#94a3b8;">${note}</span>
+          </button>
+        `;
+      })
+      .join('');
+
+    optionsContainer.querySelectorAll('.quiz-option-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (state.quizSubmitted) return;
+        state.quizSelectedOptKey = btn.getAttribute('data-orig-key');
+        optionsContainer
+          .querySelectorAll('.quiz-option-btn')
+          .forEach((b) => b.classList.remove('selected'));
+        btn.classList.add('selected');
+      });
     });
-  });
+  }
 
   // Concept Double-Verification Setup
   const verifyEnabled = document.getElementById('chkConceptVerify').checked;
@@ -2442,7 +2950,7 @@ function renderCurrentQuizQuestion() {
   if (verifyEnabled) {
     conceptBox.style.display = 'block';
     const conceptChoices = buildConceptVerificationChoices(m);
-    state.currentQuestionRenderData = { conceptChoices };
+    state.currentQuestionRenderData = { conceptChoices, useTextInputMode };
 
     conceptListEl.innerHTML = conceptChoices
       .map(
@@ -2467,7 +2975,7 @@ function renderCurrentQuizQuestion() {
     });
   } else {
     conceptBox.style.display = 'none';
-    state.currentQuestionRenderData = { conceptChoices: [] };
+    state.currentQuestionRenderData = { conceptChoices: [], useTextInputMode };
   }
 
   document.getElementById('quizFeedbackBox').style.display = 'none';
@@ -2484,15 +2992,31 @@ function buildConceptVerificationChoices(currentMistake) {
     isTrue: false
   });
 
-  // Distractor 2: Another mistake's concept or generic distractor
+  // Distractor 2: Subject-aware distractor or another mistake's concept
   const other = state.mistakes.find(
-    (x) => x.id !== currentMistake.id && x.correctConcept
+    (x) =>
+      x.id !== currentMistake.id &&
+      x.subject === currentMistake.subject &&
+      x.correctConcept
   );
   if (other) {
     choices.push({ text: other.correctConcept, isTrue: false });
+  } else if (
+    currentMistake.questionType === 'translation' ||
+    /英|English/i.test(currentMistake.subject || '')
+  ) {
+    choices.push({
+      text: '直接照中文逐字順序硬翻即可，不需要考慮英文主詞動詞一致、時態或介系詞固定搭配。',
+      isTrue: false
+    });
+  } else if (/地理|歷史|公民|社會/.test(currentMistake.subject || '')) {
+    choices.push({
+      text: '看圖表時不需要看座標軸單位與圖例，直接憑直覺挑選數值最大的一格即可。',
+      isTrue: false
+    });
   } else {
     choices.push({
-      text: '直接將題目出現的所有數字相加除以二即可得出答案，無須考慮方向或定義限制。',
+      text: '直接將題目出現的所有數字相加除以二即可得出答案，無須考慮方向、正負號或公式定義限制。',
       isTrue: false
     });
   }
@@ -2506,14 +3030,63 @@ function buildConceptVerificationChoices(currentMistake) {
   return maskedChoices.sort(() => Math.random() - 0.5);
 }
 
+function normalizeAnswerForComparison(str) {
+  return String(str || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[.,!?;:'"()[\]{}，。！？；：「」『』（）\s]+/g, ' ')
+    .trim();
+}
+
+window.overrideQuizSelfGradeCorrect = function () {
+  const m = state.quizQueue[state.quizIndex];
+  if (!m) return;
+  const targetRecord = state.mistakes.find((item) => item.id === m.id);
+  if (targetRecord) {
+    targetRecord.correctCount = (targetRecord.correctCount || 0) + 1;
+    targetRecord.masteryStatus =
+      targetRecord.correctCount >= 2 ? '已精通' : '複習中';
+  }
+  state.quizCorrectCount++;
+  state.quizWrongItems = state.quizWrongItems.filter((x) => x.id !== m.id);
+  saveToLocalStorage();
+  updateHeaderBadges();
+
+  const fb = document.getElementById('quizFeedbackBox');
+  if (fb) {
+    fb.style.background = '#ecfdf5';
+    fb.style.border = '2px solid #6ee7b7';
+    fb.innerHTML = `
+      <div style="font-size:1.05rem; font-weight:700; color:#047857;">
+        ✅ 已將您的同義寫法／算式計為「答對」，並更新本題熟練度為「${escapeHtml(targetRecord ? targetRecord.masteryStatus : '複習中')}」！
+      </div>
+    `;
+  }
+};
+
 function submitCurrentQuizAnswer() {
   if (state.quizSubmitted) return;
   const m = state.quizQueue[state.quizIndex];
   const verifyEnabled = document.getElementById('chkConceptVerify').checked;
+  const useTextInputMode = Boolean(
+    state.currentQuestionRenderData &&
+      state.currentQuestionRenderData.useTextInputMode
+  );
 
-  if (!state.quizSelectedOptKey) {
-    alert('請先選擇一個題目答案選項！');
-    return;
+  let userAnswerRaw = '';
+  if (useTextInputMode) {
+    const typedInput = document.getElementById('quizUserTypedAnswer');
+    userAnswerRaw = typedInput ? typedInput.value.trim() : '';
+    if (!userAnswerRaw) {
+      alert('請先在輸入框中寫下您的作答內容！');
+      return;
+    }
+  } else {
+    if (!state.quizSelectedOptKey) {
+      alert('請先選擇一個題目答案選項！');
+      return;
+    }
+    userAnswerRaw = state.quizSelectedOptKey;
   }
 
   if (verifyEnabled && state.quizSelectedConceptIdx === null) {
@@ -2523,8 +3096,37 @@ function submitCurrentQuizAnswer() {
 
   state.quizSubmitted = true;
 
-  const isAnswerCorrect =
-    state.quizSelectedOptKey.toUpperCase() === m.correctAnswer.toUpperCase();
+  let isAnswerCorrect = false;
+  let diffReport = null;
+
+  if (useTextInputMode) {
+    const typedInput = document.getElementById('quizUserTypedAnswer');
+    if (typedInput) typedInput.disabled = true;
+
+    const normUser = normalizeAnswerForComparison(userAnswerRaw);
+    const normCorr = normalizeAnswerForComparison(m.correctAnswer);
+    if (normUser === normCorr) {
+      isAnswerCorrect = true;
+    } else {
+      // Check numeric equivalence (e.g. 2.0 == 2)
+      const uNum = parseFloat(normUser);
+      const cNum = parseFloat(normCorr);
+      if (
+        !Number.isNaN(uNum) &&
+        !Number.isNaN(cNum) &&
+        String(uNum) === normUser &&
+        String(cNum) === normCorr &&
+        Math.abs(uNum - cNum) < 1e-6
+      ) {
+        isAnswerCorrect = true;
+      }
+    }
+    diffReport = computeWordDiffAnalysis(userAnswerRaw, m.correctAnswer);
+  } else {
+    isAnswerCorrect =
+      userAnswerRaw.toUpperCase() === m.correctAnswer.toUpperCase();
+  }
+
   const isConceptCorrect = verifyEnabled
     ? state.currentQuestionRenderData.conceptChoices[state.quizSelectedConceptIdx]
         ?.isTrue === true
@@ -2532,17 +3134,19 @@ function submitCurrentQuizAnswer() {
 
   const fullPass = isAnswerCorrect && isConceptCorrect;
 
-  // Highlight option buttons
-  document
-    .querySelectorAll('#quizOptionsContainer .quiz-option-btn')
-    .forEach((btn) => {
-      const k = btn.getAttribute('data-orig-key').toUpperCase();
-      if (k === m.correctAnswer.toUpperCase()) {
-        btn.classList.add('correct-reveal');
-      } else if (k === state.quizSelectedOptKey.toUpperCase() && !isAnswerCorrect) {
-        btn.classList.add('wrong-reveal');
-      }
-    });
+  // Highlight option buttons if multiple-choice
+  if (!useTextInputMode) {
+    document
+      .querySelectorAll('#quizOptionsContainer .quiz-option-btn')
+      .forEach((btn) => {
+        const k = btn.getAttribute('data-orig-key').toUpperCase();
+        if (k === m.correctAnswer.toUpperCase()) {
+          btn.classList.add('correct-reveal');
+        } else if (k === userAnswerRaw.toUpperCase() && !isAnswerCorrect) {
+          btn.classList.add('wrong-reveal');
+        }
+      });
+  }
 
   if (verifyEnabled) {
     document
@@ -2590,9 +3194,10 @@ function submitCurrentQuizAnswer() {
     fb.style.border = '2px solid #6ee7b7';
     fb.innerHTML = `
       <div style="font-size:1.05rem; font-weight:700; color:#047857; margin-bottom:0.4rem;">
-        🎉 完全正確！你不僅選對答案，還掌握了正確的核心觀念！
+        🎉 完全正確！你不僅答對題目，還掌握了正確的核心觀念！
       </div>
       <div style="font-size:0.9rem; color:#065f46;">
+        <strong>✅ 標準答案：</strong>${escapeHtml(m.correctAnswer)}<br/>
         <strong>🎯 核心觀念複習：</strong>${escapeHtml(m.correctConcept)}<br/>
         <strong>💡 避坑錦囊：</strong>${escapeHtml(m.keyTakeaway)}<br/>
         <span style="font-size:0.82rem; opacity:0.85;">（本題熟練狀態已更新為：<b>${escapeHtml(targetRecord ? targetRecord.masteryStatus : '複習中')}</b>）</span>
@@ -2601,19 +3206,38 @@ function submitCurrentQuizAnswer() {
   } else {
     fb.style.background = '#fef2f2';
     fb.style.border = '2px solid #fca5a5';
-    const failReason = !isAnswerCorrect
-      ? state.quizSelectedOptKey.toUpperCase() === m.wrongAnswer.toUpperCase()
-        ? `😱 小心！你這次又選了跟上次一模一樣的錯誤選項 (${m.wrongAnswer})！`
-        : `❌ 答案選錯囉（正確答案應為原選項 ${m.correctAnswer}）！`
-      : `⚠️ 雖然答案選對了，但「核心觀念確認」選錯了，小心不要靠死背答案喔！`;
+    let failReason = '';
+    let diffHtmlBlock = '';
+    if (!isAnswerCorrect) {
+      if (useTextInputMode) {
+        failReason = `✍️ 作答與標準解答有差異，請對照下方逐字比對（若您的寫法為同義詞／等價算式，可點擊下方按鈕計為答對）：`;
+        diffHtmlBlock = `
+          <div style="background:#ffffff; border:1px solid #fecaca; border-radius:8px; padding:0.65rem; margin:0.4rem 0;">
+            ${diffReport ? diffReport.html : ''}
+            <div style="margin-top:0.5rem;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="overrideQuizSelfGradeCorrect()" style="border-color:#10b981; color:#047857; font-weight:700;">
+                ✅ 我的寫法意思／同義詞／算式正確（計為答對）
+              </button>
+            </div>
+          </div>
+        `;
+      } else if (userAnswerRaw.toUpperCase() === m.wrongAnswer.toUpperCase()) {
+        failReason = `😱 小心！你這次又選了跟上次一模一樣的錯誤選項 (${escapeHtml(m.wrongAnswer)})！`;
+      } else {
+        failReason = `❌ 答案選錯囉（正確答案應為 ${escapeHtml(m.correctAnswer)}）！`;
+      }
+    } else {
+      failReason = `⚠️ 雖然題目答對了，但「核心觀念確認」選錯了，小心不要靠死背答案喔！`;
+    }
 
     fb.innerHTML = `
       <div style="font-size:1.05rem; font-weight:700; color:#b91c1c; margin-bottom:0.45rem;">
         ${failReason}
       </div>
+      ${diffHtmlBlock}
       <div style="font-size:0.9rem; color:#7f1d1d; display:flex; flex-direction:column; gap:0.35rem;">
-        <div><strong>🧐 你當初紀錄的「為何選錯」：</strong>${escapeHtml(m.whyWrong)}</div>
-        <div><strong>✅ 正確觀念解析：</strong>${escapeHtml(m.correctConcept)}</div>
+        <div><strong>🧐 你當初紀錄的「為何寫錯」：</strong>${escapeHtml(m.whyWrong)}</div>
+        <div><strong>✅ 正確觀念與寫法解析：</strong>${escapeHtml(m.correctConcept)}</div>
         <div><strong>💡 避坑錦囊：</strong>${escapeHtml(m.keyTakeaway)}</div>
       </div>
     `;
@@ -2718,6 +3342,7 @@ function renderSheetTableAndStats() {
         <td>
           <div style="font-weight:700; color:#312e81;">第 ${escapeHtml(m.questionNum)} 題</div>
           <span style="font-size:0.78rem; background:#e0e7ff; color:#4f46e5; padding:0.1rem 0.45rem; border-radius:999px; font-weight:600;">${escapeHtml(m.subject)}</span>
+          <div style="font-size:0.72rem; color:#64748b; margin-top:0.15rem;">${escapeHtml(getQuestionTypeLabel(m.questionType))}</div>
         </td>
         <td>
           <div style="font-weight:600;">${escapeHtml(m.unit)}</div>
@@ -2763,6 +3388,7 @@ function formatMistakesForSpreadsheetExport(includeBase64Crop = true) {
       科目: m.subject,
       試卷單元: m.unit,
       題號: m.questionNum,
+      題型: getQuestionTypeLabel(m.questionType),
       題目內容: m.questionText,
       選項A: m.optA || '',
       選項B: m.optB || '',
