@@ -217,11 +217,12 @@
 
                 <!-- Question Type Switcher -->
                 <div class="form-group" style="margin-bottom:0.85rem;">
-                  <label class="form-label">🎯 本題題型（支援選擇、翻譯手寫、填充計算、閱讀圖表，全科適用！）</label>
+                  <label class="form-label">🎯 本題題型（支援單選、多選 1~5/A~E、翻譯手寫、填充計算、閱讀圖表，全科適用！）</label>
                   <div class="error-tags-grid" id="questionTypeContainer" style="margin-bottom:0;">
-                    <button type="button" class="diagnosis-tag selected" data-qtype="choice">🔘 選擇題／克漏字</button>
-                    <button type="button" class="diagnosis-tag" data-qtype="translation">✍️ 翻譯／簡答／手寫非選題</button>
+                    <button type="button" class="diagnosis-tag selected" data-qtype="choice">🔘 單選題／克漏字</button>
+                    <button type="button" class="diagnosis-tag" data-qtype="multiselect">☑️ 多選題（1~5／A~E）</button>
                     <button type="button" class="diagnosis-tag" data-qtype="fill">🔤 文意字彙／填充／理化數學計算</button>
+                    <button type="button" class="diagnosis-tag" data-qtype="translation">✍️ 翻譯／簡答／手寫非選題</button>
                     <button type="button" class="diagnosis-tag" data-qtype="reading">📖 閱讀測驗／地理圖表題組</button>
                   </div>
                 </div>
@@ -259,9 +260,10 @@
                 <!-- Cropped Question Image Preview -->
                 <div id="cropPreviewArea" class="crop-preview-container" style="display:none;">
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.35rem; flex-wrap:wrap; gap:0.35rem;">
-                    <span style="font-size:0.8rem; font-weight:700; color:#4f46e5;">📸 已擷取試卷截圖（支援相片自動 OCR 題目辨識）</span>
-                    <div style="display:flex; gap:0.35rem;">
-                      <button type="button" class="btn btn-secondary btn-sm" id="btnRerunOcrOnCrop" title="重新辨識截圖中的文字與數學符號">🔍 重新辨識圖片題目</button>
+                    <span style="font-size:0.8rem; font-weight:700; color:#4f46e5;">📸 已擷取試卷截圖（支援濾除手寫算式＆自動 OCR 辨識）</span>
+                    <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
+                      <button type="button" class="btn btn-secondary btn-sm" id="btnRerunOcrOnCrop" title="重新辨識截圖中的文字與數學符號">🔍 重新辨識題目</button>
+                      <button type="button" class="btn btn-secondary btn-sm" id="btnOcrLeftPrintOnly" title="若考卷右側有手寫計算或附圖干擾，點此只辨識左半部印刷題幹與選項">✂️ 濾除右側手寫算式重讀</button>
                       <button type="button" class="btn btn-danger-outline btn-sm" id="btnRemoveCropImg">移除截圖</button>
                     </div>
                   </div>
@@ -372,30 +374,34 @@
                   </div>
                 </div>
 
-                <!-- Options A/B/C/D (Automatically hidden when Question Type is Translation / Fill / Calculation!) -->
+                <!-- Options A/B/C/D/E or 1/2/3/4/5 (Automatically hidden when Question Type is Translation / Fill!) -->
                 <div class="form-row" id="optionsFourGrid" style="grid-template-columns: 1fr 1fr;">
                   <div class="form-group">
-                    <label class="form-label">選項 (A)</label>
-                    <input type="text" class="form-input" id="fieldOptA" placeholder="選項 A 內容" />
+                    <label class="form-label" id="labelOptA">選項 (A) / (1)</label>
+                    <input type="text" class="form-input" id="fieldOptA" placeholder="選項 A 或 (1) 內容" />
                   </div>
                   <div class="form-group">
-                    <label class="form-label">選項 (B)</label>
-                    <input type="text" class="form-input" id="fieldOptB" placeholder="選項 B 內容" />
+                    <label class="form-label" id="labelOptB">選項 (B) / (2)</label>
+                    <input type="text" class="form-input" id="fieldOptB" placeholder="選項 B 或 (2) 內容" />
                   </div>
                   <div class="form-group">
-                    <label class="form-label">選項 (C)</label>
-                    <input type="text" class="form-input" id="fieldOptC" placeholder="選項 C 內容" />
+                    <label class="form-label" id="labelOptC">選項 (C) / (3)</label>
+                    <input type="text" class="form-input" id="fieldOptC" placeholder="選項 C 或 (3) 內容" />
                   </div>
                   <div class="form-group">
-                    <label class="form-label">選項 (D)</label>
-                    <input type="text" class="form-input" id="fieldOptD" placeholder="選項 D 內容" />
+                    <label class="form-label" id="labelOptD">選項 (D) / (4)</label>
+                    <input type="text" class="form-input" id="fieldOptD" placeholder="選項 D 或 (4) 內容" />
+                  </div>
+                  <div class="form-group" style="grid-column: 1 / -1;">
+                    <label class="form-label" id="labelOptE">選項 (E) / (5)（五選一或多選題第 5 選項，四選一可留空）</label>
+                    <input type="text" class="form-input" id="fieldOptE" placeholder="選項 E 或 (5) 內容（例如數學多選題第 5 選項）" />
                   </div>
                 </div>
               </div>
 
-              <!-- Step 2: 選擇錯誤答案 vs 正確答案 (Adapts to Multiple-Choice vs Translation/Calculation!) -->
+              <!-- Step 2: 選擇錯誤答案 vs 正確答案 (Adapts to Single-Choice, Multi-Select 1~5/A~E, Translation & Calculation!) -->
               <div class="form-section">
-                <div class="section-badge-title">
+                <div class="section-badge-title" style="flex-wrap:wrap; gap:0.35rem;">
                   <span id="step2TitleText">STEP 2｜比對「我的誤選／錯誤寫法」與「正確答案」</span>
                   <span id="autoAnswerMatchHint" style="font-size:0.78rem; color:#059669; font-weight:600;"></span>
                 </div>
@@ -405,24 +411,26 @@
                   <div class="choice-box wrong-box">
                     <label class="form-label" id="labelWrongAns" style="color:#b91c1c;">❌ 我當初選錯的答案 / 錯誤寫法</label>
                     <div class="option-pills" id="wrongOptionPills">
-                      <button type="button" class="option-pill" data-val="A">A</button>
-                      <button type="button" class="option-pill" data-val="B">B</button>
-                      <button type="button" class="option-pill" data-val="C">C</button>
-                      <button type="button" class="option-pill" data-val="D">D</button>
+                      <button type="button" class="option-pill" data-val="A" data-num="1">A / 1</button>
+                      <button type="button" class="option-pill" data-val="B" data-num="2">B / 2</button>
+                      <button type="button" class="option-pill" data-val="C" data-num="3">C / 3</button>
+                      <button type="button" class="option-pill" data-val="D" data-num="4">D / 4</button>
+                      <button type="button" class="option-pill" data-val="E" data-num="5">E / 5</button>
                     </div>
-                    <input type="text" class="form-input" id="fieldWrongAnswer" placeholder="點上方按鈕或直接輸入你寫錯的句子／單字／計算數值" style="margin-top:0.5rem;" required />
+                    <input type="text" class="form-input" id="fieldWrongAnswer" placeholder="單選點 1 個；多選可點多個（如 2 或 1,2）；非選直接輸入答案" style="margin-top:0.5rem;" required />
                   </div>
 
                   <!-- Correct Answer -->
                   <div class="choice-box correct-box">
                     <label class="form-label" id="labelCorrectAns" style="color:#15803d;">✅ 試卷正確答案 / 標準解答</label>
                     <div class="option-pills" id="correctOptionPills">
-                      <button type="button" class="option-pill" data-val="A">A</button>
-                      <button type="button" class="option-pill" data-val="B">B</button>
-                      <button type="button" class="option-pill" data-val="C">C</button>
-                      <button type="button" class="option-pill" data-val="D">D</button>
+                      <button type="button" class="option-pill" data-val="A" data-num="1">A / 1</button>
+                      <button type="button" class="option-pill" data-val="B" data-num="2">B / 2</button>
+                      <button type="button" class="option-pill" data-val="C" data-num="3">C / 3</button>
+                      <button type="button" class="option-pill" data-val="D" data-num="4">D / 4</button>
+                      <button type="button" class="option-pill" data-val="E" data-num="5">E / 5</button>
                     </div>
-                    <input type="text" class="form-input" id="fieldCorrectAnswer" placeholder="點上方按鈕或直接輸入正確翻譯句子／單字／標準答案" style="margin-top:0.5rem;" required />
+                    <input type="text" class="form-input" id="fieldCorrectAnswer" placeholder="單選點 1 個；多選可點多個（如 2, 5 或 B, E）；非選輸入標準答案" style="margin-top:0.5rem;" required />
                   </div>
                 </div>
 
