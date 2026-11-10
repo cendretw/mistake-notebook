@@ -2886,18 +2886,22 @@ function runAutoMistakeDiagnosis(forceOverwrite = true) {
       autoTag = '文法與詞性判斷';
       const wClean = rawWrong.toLowerCase().trim();
       const cClean = rawCorrect.toLowerCase().trim();
+      ensureLiveEnglishTranslations([rawWrong, rawCorrect], stem);
+      const wEntry = getEnglishWordEntry(rawWrong);
+      const cEntry = getEnglishWordEntry(rawCorrect);
+      const stemTrans = getCachedSentenceTranslation(stem);
 
       // Check if wClean and cClean share the same root (Word family transformation error!)
       if (wClean.length >= 3 && cClean.length >= 3 && cClean.slice(0, 3) === wClean.slice(0, 3)) {
-        const wPos = guessEnglishPartOfSpeech(wClean);
-        const cPos = guessEnglishPartOfSpeech(cClean);
-        whyWrong = `【詞性與字尾變化錯誤】：你填了「${rawWrong}」（${wPos}），已經抓對字根了！但沒注意到空格在句子結構中需要的是【${cPos}】或是複數形，因此必須變化字尾為「${rawCorrect}」！`;
-        correctConcept = `【這題應該這樣寫】：\n1. 先看空格前後的詞性線索（例如：系動詞 are/is + 副詞 usually 後方要填「形容詞」；所有格 their/its 後方要填「名詞」；助動詞/to 後方填「原形動詞」）。\n2. 將字根變化為正確詞性與單複數：填入「${rawCorrect}」（${cPos}）。`;
+        const wPos = wEntry?.pos || guessEnglishPartOfSpeech(wClean);
+        const cPos = cEntry?.pos || guessEnglishPartOfSpeech(cClean);
+        whyWrong = `【詞性與字尾變化錯誤】：你填了「${rawWrong}」（${wPos}${wEntry?.zh ? `，意為「${wEntry.zh}」` : ''}），已經抓對字根了！但沒注意到空格在句子結構中需要的是【${cPos}】或是複數形，因此必須變化字尾為「${rawCorrect}」（${cPos}${cEntry?.zh ? `，意為「${cEntry.zh}」` : ''}）！`;
+        correctConcept = `【這題應該這樣寫】：\n${stemTrans ? `📌 題意中譯：${stemTrans}\n` : ''}1. 先看空格前後的詞性線索（例如：系動詞 are/is + 副詞 usually 後方要填「形容詞」；所有格 their/its 後方要填「名詞」；助動詞/to 後方填「原形動詞」）。\n2. 將字根變化為正確詞性與單複數：填入「${rawCorrect}」（${cPos}${cEntry?.zh ? `，${cEntry.zh}` : ''}）。`;
         keyTakeaway = `文意字彙填完後必檢查：①詞性字尾(-ous形容詞 / -tion,-ings名詞 / -ly副詞) ②名詞單複數(-s) ③動詞時態(-ed)！`;
       } else {
-        whyWrong = `你填寫了「${rawWrong}」，但根據本題前後文語意與首尾字母線索，正確答案應為「${rawCorrect}」（共 ${cClean.length} 個字母，字首 ${cClean[0] || ''}、字尾 ${cClean[cClean.length - 1] || ''}）。`;
-        correctConcept = `【這題應該這樣寫】：\n1. 圈出題幹中的上下文關鍵搭配字（Context Clues）。\n2. 判斷空格所需的詞性（${guessEnglishPartOfSpeech(cClean)}）與正負向語氣，正確單字/答案為：「${rawCorrect}」。`;
-        keyTakeaway = `必背核心字彙／填空：「${rawCorrect}」— 注意其拼字（${cClean}）與前後文搭配！`;
+        whyWrong = `你填寫了「${rawWrong}」${wEntry?.zh ? `（${wEntry.pos ? wEntry.pos + ' ' : ''}${wEntry.zh}）` : ''}，但根據本題前後文語意與字首字尾線索，正確單字應為「${rawCorrect}」${cEntry?.zh ? `（${cEntry.pos ? cEntry.pos + ' ' : ''}${cEntry.zh}）` : ''}（共 ${cClean.length} 個字母，字首 ${cClean[0] || ''}、字尾 ${cClean[cClean.length - 1] || ''}）。`;
+        correctConcept = `【這題應該這樣寫】：\n${stemTrans ? `📌 題意中譯：${stemTrans}\n` : ''}1. 圈出題幹中的上下文關鍵線索：${extractSentenceClueWords(stem) || '前後文搭配詞'}。\n2. 判斷空格所需的詞性（${cEntry?.pos || guessEnglishPartOfSpeech(cClean)}）與語意，正確單字為：「${rawCorrect}」${cEntry?.zh ? `（${cEntry.zh}）` : ''}${cEntry?.syn ? `，同義詞：${cEntry.syn}` : ''}。`;
+        keyTakeaway = `必背核心字彙：「${rawCorrect}」${cEntry?.zh ? `＝${cEntry.zh}` : ''} — 注意其拼字（${cClean}）與上下文搭配！`;
       }
     }
   }
@@ -2977,42 +2981,30 @@ function runAutoMistakeDiagnosis(forceOverwrite = true) {
       correctConcept = `【這題應該這樣寫】：\n這題是經典的「詞性判斷題（同字根變化）」！\n1. 觀察空格前後的字詞結構，判斷空格缺的是主詞/受詞（填名詞）、修飾名詞或作受詞補語（填形容詞）、修飾一般動詞/整句（填副詞 -ly），還是助動詞/to 後面（填原形動詞）。\n2. 選項中 (${correctAns}) ${correctText} 為【${cPos}】，完全符合此句型位置需求，故選 (${correctAns})。`;
       keyTakeaway = `遇到四個選項長得很像的「詞性題」，先看空格前後決定詞性（-ness/-tion 名詞、-ly 副詞、-en/-ize 動詞），不用硬翻整段文章就能秒殺！`;
     } else if (isEnglishOptionSet(opts)) {
-      const phraseDict = {
-        'used for': 'be used for + V-ing（被用來做...，主詞通常是物品）',
-        'keen on': 'be keen on + V-ing（熱衷於、喜愛做...）',
-        'tired of': 'be tired of + V-ing（對...感到厭倦、受夠了...）',
-        'amazed by': 'be amazed by（對...感到驚奇讚嘆）',
-        'for a while': 'for a while（持續一小段時間）',
-        'for example': 'for example（舉例來說，用於舉出具體實例）',
-        'in the end': 'in the end（最後、終於，表結果）',
-        'all of a sudden': 'all of a sudden（突然間＝suddenly，表突發狀況）',
-        'go through': 'go through（經歷困難、仔細檢查）',
-        'carry out': 'carry out（執行、實行計畫或命令）',
-        'call on': 'call on（拜訪；呼籲、號召某人做某事）',
-        'come across': 'come across（偶然遇見、無意間發現）',
-        'because': 'because + 完整子句 (S + V)（因為...）',
-        'because of': 'because of + 名詞 / V-ing（因為...，後面絕對不能接完整子句）',
-        'since': 'since（自從...；既然/因為，後接子句）',
-        'once': 'once + 子句（一旦...就...）',
-        'in case': 'in case + 子句（以防萬一...，表事先準備）',
-        'even though': 'even though + 子句（儘管、雖然...，表讓步轉折）',
-        'as soon as': 'as soon as + 子句（一...就...）',
-        'unless': 'unless + 子句（除非...＝if...not）',
-        'infected': 'infected（adj. 受感染的，常搭配 be infected with）',
-        'sensitive': 'sensitive（adj. 敏感的、易受傷害的，常搭配 be sensitive to 對...敏感）',
-        'creative': 'creative（adj. 有創意的）',
-        'plastic': 'plastic（n./adj. 塑膠的）',
-        'distance': 'distance（n. 距離）',
-        'convenience': 'convenience（n. 便利、方便）',
-        'survival': 'survival（n. 生存、存活）',
-        'substance': 'substance（n. 物質、化學物質）'
-      };
-      const wMeaning = phraseDict[wrongText.toLowerCase()] || `「${wrongText}」`;
-      const cMeaning = phraseDict[correctText.toLowerCase()] || `「${correctText}」`;
+      // Trigger live dictionary & sentence translation in background (<150ms) if any word/sentence is not cached yet
+      ensureLiveEnglishTranslations(
+        [wrongText, correctText, opts.A, opts.B, opts.C, opts.D, opts.E],
+        stem
+      );
+
+      const wEntry = getEnglishWordEntry(wrongText);
+      const cEntry = getEnglishWordEntry(correctText);
+      const stemTrans = getCachedSentenceTranslation(stem);
+      const clueAnalysis = analyzeEnglishContextClues(
+        stem,
+        wrongAns,
+        wrongText,
+        wEntry,
+        correctAns,
+        correctText,
+        cEntry,
+        opts
+      );
+
       autoTag = '片語與字彙搭配';
-      whyWrong = `你選了 (${wrongAns}) ${wrongText}，它的意思是 ${wMeaning}。放進本題前後文時，語意邏輯或後面接的詞性搭配不符，因此判斷錯誤。`;
-      correctConcept = `【這題應該這樣寫】：\n1. 先看空格前後的關鍵字與介系詞／子句結構。\n2. 正確答案 (${correctAns}) ${correctText} 的用法為 ${cMeaning}，帶入句中不論是上下文語意還是文法搭配都完全吻合！`;
-      keyTakeaway = `必背對比：誤選的 ${wrongText} vs. 正解 ${cMeaning}，記住後面的介系詞與上下文語氣！`;
+      whyWrong = clueAnalysis.whyWrong;
+      correctConcept = clueAnalysis.correctConcept;
+      keyTakeaway = clueAnalysis.keyTakeaway;
     } else {
       // Multi-Subject Analyzer for Physics, Chemistry, Biology, Earth Science, Math, Geography, History, Civics!
       const subjGuide = getSubjectChartAndConceptGuidance(
@@ -3363,21 +3355,144 @@ function updateSelfLearningCoach(autoExpandFirstHint = false) {
       explanation: `1月最熱代表位於「南半球」；7月為南半球冬季且降雨集中，屬於典型的「夏乾冬雨＝溫帶地中海型氣候」！`
     };
   }
-  // 5. English (Translation / Cloze / Vocabulary / Reading)
+  // 5. English (Vocabulary / Cloze / Grammar / Translation / Reading)
   else {
-    deconstructHtml = `
-      <div>📌 <strong>語境與句型線索：</strong>${escapeHtml(stem ? stem.slice(0, 95) : '抓出句子的主詞 (S)、動詞時態 (V) 與空格前後搭配詞')}</div>
-      <div>🎯 <strong>所求目標（Goal）：</strong>填入符合文法結構（詞性／關代／分詞）與上下文語意的正確英文表達。</div>
-      <div>🧭 <strong>核心考點（Topic）：</strong>英文科｜句型結構分析、詞性字尾判斷與固定片語搭配。</div>
-    `;
-    hint1 = `先拆解句子骨架：找出本句真正的「主詞 (S)」與「主要動詞 (V)」在哪裡！若已經有完整 S+V 且無連接詞，後面動詞必須改為分詞 (V-ing / p.p.) 或不定詞 (to V)；若接子句則需關係代名詞或連接詞。`;
-    hint2 = `檢查空格前後的「固定搭配線索」：\n• 關代題：看先行詞是人還是物？前面有沒有逗號（有逗號不能用 that）？\n• 字彙詞性題：看字尾（-tion/-ness 名詞、-ous/-ive/-al 形容詞、-ly 副詞）！\n• 翻譯題：注意動詞過去式時態與主詞單複數一致！`;
-    hint3 = `【標準正解核對】：\n正確答案為：「${correctAns || '請在 STEP 2 輸入正解'}」。\n對照你原本寫的「${wrongAns || '尚未輸入'}」，將漏掉的介系詞或詞性變化記進避坑錦囊！`;
-    twinQ = `【舉一反三自測】請完成關係代名詞填空：The young student talked to the people, ______ were cleaning the beach.（注意空格前有逗號，且先行詞是 people，後面緊接動詞 were，應填哪個關代？）`;
-    currentTwinQuizSolution = {
-      expectedAnswers: ['who'],
-      explanation: `先行詞是 people（人），後面緊接動詞 were（缺主格），且前面有逗號（非限定用法，絕對不能用 that），故唯一正解為 who！`
+    const opts = {
+      A: document.getElementById('fieldOptA')?.value.trim() || '',
+      B: document.getElementById('fieldOptB')?.value.trim() || '',
+      C: document.getElementById('fieldOptC')?.value.trim() || '',
+      D: document.getElementById('fieldOptD')?.value.trim() || '',
+      E: document.getElementById('fieldOptE')?.value.trim() || ''
     };
+    const wKey = wrongAns.toUpperCase();
+    const cKey = correctAns.toUpperCase();
+    const wWord = opts[wKey] || wrongAns;
+    const cWord = opts[cKey] || correctAns;
+
+    // Trigger live dictionary & sentence translation in background (<150ms) and auto-refresh UI when ready
+    ensureLiveEnglishTranslations(
+      [wWord, cWord, opts.A, opts.B, opts.C, opts.D, opts.E],
+      stem
+    );
+
+    const wEntry = getEnglishWordEntry(wWord);
+    const cEntry = getEnglishWordEntry(cWord);
+    const stemTrans = getCachedSentenceTranslation(stem);
+    const clueSummary = extractSentenceClueWords(stem);
+
+    // Format all options (A)~(E) with their Chinese meanings, parts of speech, and synonyms
+    const optExplanationLines = ['A', 'B', 'C', 'D', 'E']
+      .filter((k) => opts[k])
+      .map((k) => {
+        const word = opts[k];
+        const entry = getEnglishWordEntry(word);
+        const posStr = entry?.pos ? `[${entry.pos}] ` : '';
+        const zhStr = entry?.zh ? entry.zh : '查詢單字字義中...';
+        const synStr = entry?.syn ? `（同義：${entry.syn}）` : '';
+        const mark =
+          k === cKey ? ' ✅【正解】' : k === wKey ? ' ❌【你的誤選】' : '';
+        return `• (${k}) ${word}：${posStr}${zhStr}${synStr}${mark}`;
+      });
+
+    const isVocabChoice = isEnglishOptionSet(opts) && !isEnglishWordFamilyQuestion(opts);
+
+    if (isVocabChoice) {
+      deconstructHtml = `
+        <div>📌 <strong>題幹語境拆解：</strong>${escapeHtml(stem || '請輸入或框選英文題幹')}</div>
+        ${
+          stemTrans
+            ? `<div style="margin-top:4px; color:#1e40af; background:#eff6ff; padding:6px 10px; border-radius:6px; font-weight:600;">💬 <strong>整句中文翻譯：</strong>${escapeHtml(stemTrans)}</div>`
+            : ''
+        }
+        <div style="margin-top:4px;">🔑 <strong>破題關鍵線索字（Context Clues）：</strong><span style="color:#b45309; font-weight:700;">${escapeHtml(
+          clueSummary || '觀察空格前後形容詞、名詞與轉折連詞的語氣關係'
+        )}</span></div>
+        <div>🧭 <strong>核心考點（Topic）：</strong>英文單字文意選填｜前後文語境線索（Context Clues）與選項字義精準辨析。</div>
+      `;
+
+      hint1 = `【提示 1：怎麼從題幹線索推敲空格的意思？（不用硬背也能解題）】\n1. 先看空格前後的詞性與修飾對象：${
+        /a\(n\)\s*(?:______\s*)?([a-zA-Z]+)/i.exec(stem)
+          ? `空格位於冠詞 a(n) 與名詞「${/a\(n\)\s*(?:______\s*)?([a-zA-Z]+)/i.exec(stem)[1]}」之間，必填【形容詞 (adj.)】用來描述該名詞的特質！`
+          : `觀察空格在句中的位置（修飾名詞填形容詞、作主詞受詞填名詞、敘述動作填動詞）。`
+      }\n2. 抓出題幹後半句給你的「同義解釋線索」：${
+        clueSummary || '請看逗號後方的補充說明或因果連詞'
+      }。\n${
+        stemTrans ? `3. 整句中譯對照：「${stemTrans}」` : ''
+      }`;
+
+      hint2 =
+        optExplanationLines.length > 0
+          ? `【提示 2：本題各選項單字中文意思、詞性與同義詞對照】：\n${optExplanationLines.join('\n')}`
+          : `【提示 2：核心單字對照】：\n• 你的誤選：${wWord || '尚未輸入'} ${
+              wEntry?.zh ? `（${wEntry.pos || ''} ${wEntry.zh}）` : ''
+            }\n• 正確答案：${cWord || '尚未輸入'} ${
+              cEntry?.zh ? `（${cEntry.pos || ''} ${cEntry.zh}）` : ''
+            }`;
+
+      const clueDiag = analyzeEnglishContextClues(
+        stem,
+        wKey,
+        wWord,
+        wEntry,
+        cKey,
+        cWord,
+        cEntry,
+        opts
+      );
+      hint3 = `【提示 3：為什麼選 (${cKey || '?'}) ${cWord} 而不選 (${wKey || '?'}) ${wWord}？】\n❌ 誤選原因：${
+        clueDiag.whyWrong
+      }\n\n✅ 正確推導：${clueDiag.correctConcept}`;
+
+      const cleanTargetWord = (cWord || 'faithful').trim();
+      const targetZh = cEntry?.zh || '忠實的、可靠的';
+      const targetSyn = cEntry?.syn || 'loyal / devoted';
+      if (/^faithful$/i.test(cleanTargetWord)) {
+        twinQ = `【舉一反三自測】請根據上下文填入與本題正解相同的核心單字（提示：意為「${targetZh}」，同義詞 ${targetSyn}，字首 f）：\nShe has remained a ______ friend to me throughout all my difficult times, never leaving my side.`;
+      } else if (cleanTargetWord && /^[a-zA-Z-]+$/.test(cleanTargetWord)) {
+        twinQ = `【舉一反三自測】請複習並拼寫出本題的正確英文單字：\n中文意思為「${targetZh}」${
+          cEntry?.pos ? `（詞性：${cEntry.pos}）` : ''
+        }${
+          cEntry?.syn ? `，英文同義詞為 ${cEntry.syn}` : ''
+        }，字首為「${cleanTargetWord[0]}」、共 ${cleanTargetWord.length} 個字母，請問這個單字怎麼拼？`;
+      } else {
+        twinQ = `【舉一反三自測】Eric has been a ______ (忠實的、忠誠的，同義於 loyal / devoted) employee for over ten years. 請輸入空格應填的英文單字：`;
+      }
+      currentTwinQuizSolution = {
+        expectedAnswers: [
+          cleanTargetWord.toLowerCase(),
+          cKey.toLowerCase()
+        ].filter(Boolean),
+        explanation: `正確單字為「${cleanTargetWord}」（${cEntry?.pos || 'adj.'} ${targetZh}）！搭配題幹的正面持續特質線索，牢記它的同義詞：${targetSyn}。`
+      };
+    } else {
+      deconstructHtml = `
+        <div>📌 <strong>語境與句型線索：</strong>${escapeHtml(stem ? stem.slice(0, 120) : '抓出句子的主詞 (S)、動詞時態 (V) 與空格前後搭配詞')}</div>
+        ${
+          stemTrans
+            ? `<div style="margin-top:4px; color:#1e40af; background:#eff6ff; padding:6px 10px; border-radius:6px; font-weight:600;">💬 <strong>整句中文翻譯：</strong>${escapeHtml(stemTrans)}</div>`
+            : ''
+        }
+        <div>🎯 <strong>所求目標（Goal）：</strong>填入符合文法結構（詞性／關代／分詞）與上下文語意的正確英文表達。</div>
+        <div>🧭 <strong>核心考點（Topic）：</strong>英文科｜句型結構分析、詞性字尾判斷與關鍵字彙搭配。</div>
+      `;
+      hint1 = `先拆解句子骨架：找出本句真正的「主詞 (S)」與「主要動詞 (V)」在哪裡！\n• 上下文關鍵字中譯：${
+        clueSummary || '觀察空格前後的介系詞、冠詞與連接詞'
+      }${stemTrans ? `\n• 句意中譯：${stemTrans}` : ''}`;
+      hint2 =
+        optExplanationLines.length > 0
+          ? `【本題各選項單字／詞性中譯對照】：\n${optExplanationLines.join('\n')}`
+          : `檢查空格前後的「固定搭配線索」：\n• 關代題：看先行詞是人還是物？前面有沒有逗號（有逗號不能用 that）？\n• 字彙詞性題：看字尾（-tion/-ness 名詞、-ous/-ive/-al 形容詞、-ly 副詞）！`;
+      hint3 = `【標準正解核對】：\n正確答案為：「${
+        cWord ? `(${cKey}) ${cWord}` : correctAns || '請在 STEP 2 輸入正解'
+      }」${cEntry?.zh ? `（${cEntry.pos || ''} ${cEntry.zh}）` : ''}。\n對照你原本寫的「${
+        wWord ? `(${wKey}) ${wWord}` : wrongAns || '尚未輸入'
+      }」${wEntry?.zh ? `（${wEntry.pos || ''} ${wEntry.zh}）` : ''}，將詞義與搭配記進避坑錦囊！`;
+      twinQ = `【舉一反三自測】請完成關係代名詞填空：The young student talked to the people, ______ were cleaning the beach.（注意空格前有逗號，且先行詞是 people，後面緊接動詞 were，應填哪個關代？）`;
+      currentTwinQuizSolution = {
+        expectedAnswers: ['who'],
+        explanation: `先行詞是 people（人），後面緊接動詞 were（缺主格），且前面有逗號（非限定用法，絕對不能用 that），故唯一正解為 who！`
+      };
+    }
   }
 
   deconstructEl.innerHTML = deconstructHtml;
@@ -3485,6 +3600,560 @@ function getSubjectChartAndConceptGuidance(subject, text, wrongText, correctText
     howToSolve: `1. 先圈出題幹的核心條件與問題焦點。\n2. 對照「${wrongText}」與「${correctText}」的差異，確認只有「${correctText}」完全符合定義與題意。`,
     takeaway: `熟記核心差異：❌ 誤區「${wrongText.slice(0, 18)}」 vs. ✅ 正解「${correctText.slice(0, 18)}」！`
   };
+}
+
+// =========================================================================
+// 3-Tier English Vocabulary, Live Dictionary & Context Clue Engine
+// =========================================================================
+const ENGLISH_VOCAB_DICT = {
+  // High-frequency high school exam vocabulary & phrases
+  faithful: {
+    pos: 'adj.',
+    zh: '忠實的、忠誠的、守信的',
+    syn: 'loyal, devoted, dependable, true',
+    usage: '修飾員工、朋友或支持者，表示長期忠心耿耿、值得信賴'
+  },
+  potential: {
+    pos: 'adj. / n.',
+    zh: '潛在的、可能的（尚未發生的）；潛力',
+    syn: 'possible, likely, future, prospective',
+    usage: '指「未來可能成為...但目前還不是」（如 potential customer 潛在客戶），不能用來形容已經任職十年的資深員工'
+  },
+  dependable: {
+    pos: 'adj.',
+    zh: '可靠的、值得信賴的',
+    syn: 'reliable, trustworthy, faithful',
+    usage: '形容人做事穩重可靠'
+  },
+  committed: {
+    pos: 'adj.',
+    zh: '盡心盡力的、堅定投入的',
+    syn: 'devoted, dedicated, loyal',
+    usage: '常搭配 committed to + N / V-ing（全心投入於...）'
+  },
+  employee: {
+    pos: 'n.',
+    zh: '員工、受僱者',
+    syn: 'worker, staff member',
+    usage: '指受僱於公司的人（雇主則為 employer）'
+  },
+  employer: {
+    pos: 'n.',
+    zh: '雇主、老闆',
+    syn: 'boss, manager, company',
+    usage: '指雇用員工的人或機構'
+  },
+  artificial: {
+    pos: 'adj.',
+    zh: '人造的、人工的、假裝的',
+    syn: 'man-made, synthetic, fake',
+    usage: '反義詞為 natural（天然的）'
+  },
+  reluctant: {
+    pos: 'adj.',
+    zh: '不情願的、勉強的',
+    syn: 'unwilling, hesitant',
+    usage: '常搭配 be reluctant to V（不情願做某事）'
+  },
+  temporary: {
+    pos: 'adj.',
+    zh: '暫時的、臨時的',
+    syn: 'short-term, brief',
+    usage: '反義詞為 permanent（永久的）'
+  },
+  permanent: {
+    pos: 'adj.',
+    zh: '永久的、長久的',
+    syn: 'lasting, enduring, eternal',
+    usage: '反義詞為 temporary（暫時的）'
+  },
+  enthusiastic: {
+    pos: 'adj.',
+    zh: '熱情的、熱心的',
+    syn: 'eager, passionate, keen',
+    usage: '常搭配 be enthusiastic about（對...充滿熱情）'
+  },
+  capable: {
+    pos: 'adj.',
+    zh: '有能力的、能幹的',
+    syn: 'able, competent',
+    usage: '常搭配 be capable of + N / V-ing'
+  },
+  responsible: {
+    pos: 'adj.',
+    zh: '負責任的、應負責任的',
+    syn: 'accountable, reliable',
+    usage: '常搭配 be responsible for（對...負責）'
+  },
+  available: {
+    pos: 'adj.',
+    zh: '可獲得的、有空的、可用的',
+    syn: 'accessible, obtainable, free',
+    usage: '指物品可買到或人有空出席'
+  },
+  essential: {
+    pos: 'adj.',
+    zh: '必要的、極為重要的、本質的',
+    syn: 'vital, crucial, necessary',
+    usage: '常搭配 it is essential that S + (should) + V'
+  },
+  significant: {
+    pos: 'adj.',
+    zh: '重大的、顯著的、有意義的',
+    syn: 'important, notable, considerable',
+    usage: '形容變化、影響或成就很顯著'
+  },
+  considerate: {
+    pos: 'adj.',
+    zh: '體貼的、設想周到的',
+    syn: 'thoughtful, kind, caring',
+    usage: '注意區別：considerable 是「相當大的、可觀的」'
+  },
+  considerable: {
+    pos: 'adj.',
+    zh: '相當大的、可觀的（數量或程度）',
+    syn: 'substantial, large, significant',
+    usage: '注意區別：considerate 是「體貼的」'
+  },
+  sensitive: {
+    pos: 'adj.',
+    zh: '敏感的、易受影響的',
+    syn: 'delicate, reactive',
+    usage: '常搭配 be sensitive to；注意區別 sensible（明智的、合理的）'
+  },
+  sensible: {
+    pos: 'adj.',
+    zh: '明智的、合情合理的',
+    syn: 'wise, reasonable, practical',
+    usage: '注意區別 sensitive（敏感的）'
+  },
+  respectful: {
+    pos: 'adj.',
+    zh: '恭敬的、有禮貌的（對他人表示尊重）',
+    syn: 'polite, courteous',
+    usage: '區別：respectable（值得尊敬的、體面的）、respective（各自的）'
+  },
+  respectable: {
+    pos: 'adj.',
+    zh: '值得尊敬的、體面的',
+    syn: 'reputable, honorable',
+    usage: '區別：respectful（對人恭敬有禮的）'
+  },
+  respective: {
+    pos: 'adj.',
+    zh: '各自的、分別的',
+    syn: 'individual, separate',
+    usage: '例如 return to their respective homes（回到各自的家）'
+  },
+  'used for': {
+    pos: 'phr.',
+    zh: '被用來作為...（表用途，主詞通常是物品）',
+    syn: 'utilized for, employed for',
+    usage: 'be used for + V-ing / N'
+  },
+  'keen on': {
+    pos: 'phr.',
+    zh: '熱衷於、非常喜歡',
+    syn: 'fond of, enthusiastic about',
+    usage: 'be keen on + V-ing / N'
+  },
+  'tired of': {
+    pos: 'phr.',
+    zh: '對...感到厭倦、厭煩',
+    syn: 'sick of, bored with, fed up with',
+    usage: 'be tired of + V-ing / N'
+  },
+  'amazed by': {
+    pos: 'phr.',
+    zh: '對...感到驚奇、讚嘆',
+    syn: 'surprised by, astonished at',
+    usage: 'be amazed by / at + N'
+  },
+  'for a while': {
+    pos: 'phr.',
+    zh: '持續一小段時間',
+    syn: 'for a short time',
+    usage: '表時間持續一陣子'
+  },
+  'for example': {
+    pos: 'phr.',
+    zh: '舉例來說',
+    syn: 'for instance',
+    usage: '用於舉出具體例子說明前句'
+  },
+  'in the end': {
+    pos: 'phr.',
+    zh: '最後、終於',
+    syn: 'finally, eventually, at last',
+    usage: '表經過一番過程後的最終結果'
+  },
+  'all of a sudden': {
+    pos: 'phr.',
+    zh: '突然間、出乎意料地',
+    syn: 'suddenly, unexpectedly',
+    usage: '表突發事件'
+  },
+  'go through': {
+    pos: 'phr.',
+    zh: '經歷（困難／痛苦）、仔細檢查',
+    syn: 'experience, undergo, examine',
+    usage: '後接難關、考驗或文件'
+  },
+  'carry out': {
+    pos: 'phr.',
+    zh: '執行、貫徹（計畫／實驗／承諾）',
+    syn: 'conduct, perform, execute',
+    usage: '常用於 carry out a plan / survey / experiment'
+  },
+  'call on': {
+    pos: 'phr.',
+    zh: '呼籲、號召；拜訪',
+    syn: 'appeal to, urge, visit',
+    usage: 'call on sb. to V（呼籲某人做某事）'
+  },
+  'come across': {
+    pos: 'phr.',
+    zh: '偶然遇見、無意間發現',
+    syn: 'run into, encounter by chance',
+    usage: '不接被動語態'
+  },
+  because: {
+    pos: 'conj.',
+    zh: '因為（從屬連接詞）',
+    syn: 'since, as',
+    usage: '後面必須接完整子句（主詞 S + 動詞 V）'
+  },
+  'because of': {
+    pos: 'prep.',
+    zh: '因為、由於（介系詞片語）',
+    syn: 'due to, owing to, on account of',
+    usage: '後面只能接名詞 (N) 或動名詞 (V-ing)，不能接完整子句'
+  }
+};
+
+const liveDictCache = {};
+const liveSentenceCache = {};
+const inFlightTranslations = new Set();
+
+function normalizeLookupKey(word) {
+  return (word || '')
+    .trim()
+    .replace(/^\([A-Ea-e1-5]\)\s*/, '')
+    .toLowerCase();
+}
+
+function getEnglishWordEntry(word) {
+  const key = normalizeLookupKey(word);
+  if (!key) return null;
+  if (ENGLISH_VOCAB_DICT[key]) return ENGLISH_VOCAB_DICT[key];
+  if (liveDictCache[key]) return liveDictCache[key];
+  return null;
+}
+
+function getCachedSentenceTranslation(sentence) {
+  const clean = (sentence || '').trim();
+  if (!clean) return '';
+  return liveSentenceCache[clean] || '';
+}
+
+function mapGooglePosToAbbrev(posRaw) {
+  const p = (posRaw || '').toLowerCase();
+  if (p.includes('adjective')) return 'adj. 形容詞';
+  if (p.includes('noun')) return 'n. 名詞';
+  if (p.includes('verb') && !p.includes('adverb')) return 'v. 動詞';
+  if (p.includes('adverb')) return 'adv. 副詞';
+  if (p.includes('preposition')) return 'prep. 介系詞';
+  if (p.includes('conjunction')) return 'conj. 連接詞';
+  if (p.includes('pronoun')) return 'pron. 代名詞';
+  return posRaw || '';
+}
+
+async function fetchGoogleDictEntry(word) {
+  const key = normalizeLookupKey(word);
+  if (!key || ENGLISH_VOCAB_DICT[key] || liveDictCache[key]) return;
+  const inflightKey = `word:${key}`;
+  if (inFlightTranslations.has(inflightKey)) return;
+  inFlightTranslations.add(inflightKey);
+
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-TW&dt=t&dt=bd&q=${encodeURIComponent(
+      key
+    )}`;
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const basicTrans = Array.isArray(data?.[0])
+      ? data[0]
+          .map((seg) => seg?.[0] || '')
+          .join('')
+          .trim()
+      : '';
+
+    let posList = [];
+    let zhMeanings = [];
+    let synonyms = [];
+
+    if (Array.isArray(data?.[1])) {
+      for (const block of data[1]) {
+        const pos = mapGooglePosToAbbrev(block?.[0]);
+        if (pos) posList.push(pos);
+        if (Array.isArray(block?.[1])) {
+          zhMeanings.push(...block[1].slice(0, 4));
+        }
+        if (Array.isArray(block?.[2])) {
+          for (const rev of block[2].slice(0, 2)) {
+            if (Array.isArray(rev?.[1])) {
+              for (const synWord of rev[1]) {
+                if (
+                  synWord &&
+                  synWord.toLowerCase() !== key &&
+                  synonyms.length < 4 &&
+                  !synonyms.includes(synWord)
+                ) {
+                  synonyms.push(synWord);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const uniqueZh = [...new Set(zhMeanings)].slice(0, 4).join('、');
+    const finalZh =
+      uniqueZh ||
+      (basicTrans && basicTrans.toLowerCase() !== key ? basicTrans : '');
+    if (finalZh) {
+      liveDictCache[key] = {
+        pos: posList[0] || guessEnglishPartOfSpeech(key),
+        zh: finalZh,
+        syn: synonyms.join(', '),
+        usage: ''
+      };
+    }
+  } catch (err) {
+    console.warn('Live dictionary lookup skipped:', err);
+  } finally {
+    inFlightTranslations.delete(inflightKey);
+  }
+}
+
+async function fetchGoogleSentenceTranslation(sentence) {
+  const clean = (sentence || '').trim();
+  if (!clean || liveSentenceCache[clean]) return;
+  const asciiCount = (clean.match(/[A-Za-z]/g) || []).length;
+  if (asciiCount < 8) return;
+
+  const inflightKey = `sent:${clean}`;
+  if (inFlightTranslations.has(inflightKey)) return;
+  inFlightTranslations.add(inflightKey);
+
+  try {
+    const querySent = clean
+      .replace(/^\d+[\.\)]\s*/, '')
+      .replace(/_{2,}/g, ' ___ ');
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-TW&dt=t&q=${encodeURIComponent(
+      querySent
+    )}`;
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data?.[0])) {
+      const translated = data[0]
+        .map((seg) => seg?.[0] || '')
+        .join('')
+        .trim();
+      if (translated && translated !== querySent) {
+        liveSentenceCache[clean] = translated;
+      }
+    }
+  } catch (err) {
+    console.warn('Sentence translation skipped:', err);
+  } finally {
+    inFlightTranslations.delete(inflightKey);
+  }
+}
+
+function ensureLiveEnglishTranslations(words = [], sentence = '') {
+  const tasks = [];
+  for (const w of words) {
+    const key = normalizeLookupKey(w);
+    if (
+      key &&
+      /[a-zA-Z]/.test(key) &&
+      !ENGLISH_VOCAB_DICT[key] &&
+      !liveDictCache[key] &&
+      !inFlightTranslations.has(`word:${key}`)
+    ) {
+      tasks.push(fetchGoogleDictEntry(key));
+    }
+  }
+
+  // Also translate key content words from the sentence so context clues are rich
+  const contentWords =
+    (sentence || '')
+      .match(/[a-zA-Z]{5,}/g)
+      ?.map((w) => w.toLowerCase())
+      .filter(
+        (w) =>
+          ![
+            'which',
+            'where',
+            'there',
+            'their',
+            'would',
+            'could',
+            'should',
+            'about',
+            'after',
+            'before',
+            'always',
+            'years',
+            'company'
+          ].includes(w)
+      )
+      .slice(0, 5) || [];
+
+  for (const cw of contentWords) {
+    if (
+      !ENGLISH_VOCAB_DICT[cw] &&
+      !liveDictCache[cw] &&
+      !inFlightTranslations.has(`word:${cw}`)
+    ) {
+      tasks.push(fetchGoogleDictEntry(cw));
+    }
+  }
+
+  const cleanSent = (sentence || '').trim();
+  if (
+    cleanSent &&
+    !liveSentenceCache[cleanSent] &&
+    !inFlightTranslations.has(`sent:${cleanSent}`)
+  ) {
+    tasks.push(fetchGoogleSentenceTranslation(cleanSent));
+  }
+
+  if (tasks.length > 0) {
+    Promise.all(tasks).then(() => {
+      updateSelfLearningCoach(false);
+      const wVal = document.getElementById('fieldWrongAnswer')?.value.trim();
+      const cVal = document.getElementById('fieldCorrectAnswer')?.value.trim();
+      if (wVal && cVal) {
+        runAutoMistakeDiagnosis(true);
+      }
+    });
+  }
+}
+
+function extractSentenceClueWords(stem) {
+  if (!stem) return '';
+  const clues = [];
+  const lower = stem.toLowerCase();
+
+  if (/for over ten years|for many years|for a long time|for decades/.test(lower)) {
+    clues.push('for over ten years（任職／持續超過十年 ➔ 表長期穩定，非潛在未發生）');
+  }
+  if (/dependable/.test(lower)) {
+    clues.push('dependable（adj. 可靠的、值得信賴的）');
+  }
+  if (/committed(?:\s+to)?/.test(lower)) {
+    clues.push('committed to his work（全心投入工作、盡忠職守）');
+  }
+  if (/employee/.test(lower)) {
+    clues.push('employee（n. 員工）');
+  }
+  if (/however|but|yet|although|though|despite|in spite of/.test(lower)) {
+    clues.push('轉折語氣詞（前後文語意相反）');
+  }
+  if (/therefore|thus|as a result|consequently|because|since/.test(lower)) {
+    clues.push('因果邏輯連接詞（前後文具因果推論關係）');
+  }
+
+  // Also append any other words from stem that have dictionary entries
+  const tokens = stem.match(/[a-zA-Z]{5,}/g) || [];
+  for (const tok of tokens) {
+    const k = tok.toLowerCase();
+    if (['dependable', 'committed', 'employee'].includes(k)) continue;
+    const entry = getEnglishWordEntry(k);
+    if (entry?.zh && clues.length < 4) {
+      clues.push(`${tok}（${entry.zh.split('、')[0]}）`);
+    }
+  }
+
+  return clues.join(' ＋ ');
+}
+
+function analyzeEnglishContextClues(
+  stem,
+  wrongAns,
+  wrongText,
+  wEntry,
+  correctAns,
+  correctText,
+  cEntry,
+  opts
+) {
+  const wMeaning = wEntry?.zh
+    ? `「${wEntry.zh}」（${wEntry.pos || guessEnglishPartOfSpeech(wrongText)}${
+        wEntry.syn ? `，同義詞：${wEntry.syn}` : ''
+      }）`
+    : `（${guessEnglishPartOfSpeech(wrongText)}，查詢字義中...）`;
+
+  const cMeaning = cEntry?.zh
+    ? `「${cEntry.zh}」（${cEntry.pos || guessEnglishPartOfSpeech(correctText)}${
+        cEntry.syn ? `，同義詞：${cEntry.syn}` : ''
+      }）`
+    : `（${guessEnglishPartOfSpeech(correctText)}，查詢字義中...）`;
+
+  const stemTrans = getCachedSentenceTranslation(stem);
+  const clueStr = extractSentenceClueWords(stem);
+
+  // Build option summary table for all options (A)~(D)/(E)
+  const allOptsSummary = ['A', 'B', 'C', 'D', 'E']
+    .filter((k) => opts && opts[k])
+    .map((k) => {
+      const word = opts[k];
+      const ent = getEnglishWordEntry(word);
+      const zh = ent?.zh ? `${ent.pos ? ent.pos + ' ' : ''}${ent.zh}` : '查詢中...';
+      return `(${k}) ${word}【${zh}】`;
+    })
+    .join(' ／ ');
+
+  let whyWrong = `你選了 (${wrongAns}) ${wrongText}，它的中文意思是${wMeaning}。`;
+  if (wEntry?.usage) {
+    whyWrong += `\n👉 語意衝突點：${wEntry.usage}。`;
+  } else if (clueStr) {
+    whyWrong += `\n👉 語意衝突點：題幹給出的關鍵線索是「${clueStr}」，把「${
+      wEntry?.zh || wrongText
+    }」放進句中會與前後文邏輯矛盾！`;
+  } else {
+    whyWrong += `\n👉 語意衝突點：放進本題前後文時，與題幹描述的情境語意不符。`;
+  }
+
+  let correctConcept = `【這題應該這樣解】：\n`;
+  if (stemTrans) {
+    correctConcept += `1. 【整句中譯】：${stemTrans}\n`;
+  }
+  correctConcept += `${stemTrans ? '2' : '1'}. 【抓題幹關鍵線索】：${
+    clueStr || '觀察空格前後的修飾對象、形容詞正負向語氣與補充說明子句'
+  }。\n`;
+  correctConcept += `${
+    stemTrans ? '3' : '2'
+  }. 【正解字義與呼應】：正確答案 (${correctAns}) ${correctText} 的意思是${cMeaning}${
+    cEntry?.usage ? `（${cEntry.usage}）` : ''
+  }，完全呼應題幹的語境線索！`;
+  if (allOptsSummary) {
+    correctConcept += `\n📌 【全選項字義一次必背】：${allOptsSummary}`;
+  }
+
+  const keyTakeaway = `必背單字對比：❌ (${wrongAns}) ${wrongText}＝${
+    wEntry?.zh || '誤選字'
+  } vs. ✅ (${correctAns}) ${correctText}＝${
+    cEntry?.zh || '正解字'
+  }${cEntry?.syn ? `（同義詞：${cEntry.syn}）` : ''}！`;
+
+  return { whyWrong, correctConcept, keyTakeaway };
 }
 
 function isEnglishOptionSet(opts) {
