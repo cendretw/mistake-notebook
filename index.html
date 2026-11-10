@@ -14,6 +14,8 @@
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <!-- PDF.js for rendering exam PDFs and extracting text -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- Tesseract.js for OCR text & math recognition on uploaded photos (.jpg/.png) and scanned PDFs -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -257,10 +259,16 @@
                 <!-- Cropped Question Image Preview -->
                 <div id="cropPreviewArea" class="crop-preview-container" style="display:none;">
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.35rem; flex-wrap:wrap; gap:0.35rem;">
-                    <span style="font-size:0.8rem; font-weight:700; color:#4f46e5;">📸 已擷取試卷截圖（支援文章／圖表＋題目合併預覽）</span>
-                    <button type="button" class="btn btn-danger-outline btn-sm" id="btnRemoveCropImg">移除截圖</button>
+                    <span style="font-size:0.8rem; font-weight:700; color:#4f46e5;">📸 已擷取試卷截圖（支援相片自動 OCR 題目辨識）</span>
+                    <div style="display:flex; gap:0.35rem;">
+                      <button type="button" class="btn btn-secondary btn-sm" id="btnRerunOcrOnCrop" title="重新辨識截圖中的文字與數學符號">🔍 重新辨識圖片題目</button>
+                      <button type="button" class="btn btn-danger-outline btn-sm" id="btnRemoveCropImg">移除截圖</button>
+                    </div>
                   </div>
                   <img id="cropPreviewImg" src="" alt="題目截圖預覽" />
+                  <div id="ocrStatusBar" style="display:none; margin-top:0.45rem; padding:0.45rem 0.7rem; background:#eef2ff; border:1px solid #c7d2fe; border-radius:6px; font-size:0.8rem; color:#312e81; font-weight:600;">
+                    🔍 正在從截圖自動辨識題目文字與數學符號...
+                  </div>
                 </div>
 
                 <!-- If multiple questions were detected in crop region, let student pick one -->
@@ -270,11 +278,98 @@
                 </div>
 
                 <div class="form-group">
-                  <label class="form-label">
-                    <span id="labelQuestionStem">題目敘述 / 翻譯原句 / 計算題幹（若已框選截圖，此欄可選填）</span>
+                  <label class="form-label" style="flex-wrap:wrap; gap:0.35rem;">
+                    <span id="labelQuestionStem">題目敘述 / 翻譯原句 / 計算題幹（框選照片或 PDF 會自動辨識帶入）</span>
                     <button type="button" class="btn btn-secondary btn-sm" id="btnParseRawQuestion" title="自動整理題號與選項">✨ 自動整理題目格式</button>
                   </label>
-                  <textarea class="form-textarea" id="fieldQuestionText" placeholder="在左側試卷框選題目會自動帶入；若為翻譯題可輸入中文題目、若為物理化學地理可輸入題幹或關鍵條件..."></textarea>
+                  <!-- Math & Science Quick Symbol Bar -->
+                  <div id="mathSymbolToolbar" style="display:flex; flex-wrap:wrap; gap:0.25rem; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:0.3rem 0.5rem; margin-bottom:0.35rem;">
+                    <span style="font-size:0.74rem; color:#64748b; font-weight:600; margin-right:0.2rem;">🧮 符號快捷輸入：</span>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="√" style="padding:0.12rem 0.42rem; font-size:0.78rem;">√</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="²" style="padding:0.12rem 0.42rem; font-size:0.78rem;">x²</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="³" style="padding:0.12rem 0.42rem; font-size:0.78rem;">x³</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="α" style="padding:0.12rem 0.42rem; font-size:0.78rem;">α</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="β" style="padding:0.12rem 0.42rem; font-size:0.78rem;">β</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="θ" style="padding:0.12rem 0.42rem; font-size:0.78rem;">θ</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="π" style="padding:0.12rem 0.42rem; font-size:0.78rem;">π</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="∠" style="padding:0.12rem 0.42rem; font-size:0.78rem;">∠</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="△" style="padding:0.12rem 0.42rem; font-size:0.78rem;">△</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="°" style="padding:0.12rem 0.42rem; font-size:0.78rem;">°</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="±" style="padding:0.12rem 0.42rem; font-size:0.78rem;">±</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="×" style="padding:0.12rem 0.42rem; font-size:0.78rem;">×</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="/" style="padding:0.12rem 0.42rem; font-size:0.78rem;">a/b</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="→" style="padding:0.12rem 0.42rem; font-size:0.78rem;">→</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="⇌" style="padding:0.12rem 0.42rem; font-size:0.78rem;">⇌</button>
+                  </div>
+                  <textarea class="form-textarea" id="fieldQuestionText" placeholder="在左側試卷（PDF 或相片 JPG/PNG）框選題目會自動 OCR 辨識帶入；亦可直接輸入或微調題幹..."></textarea>
+                </div>
+
+                <!-- 🧭 Autonomous Self-Directed Learning Coach (自主學習三階段引導中心) -->
+                <div id="selfLearningCoachPanel" style="background:linear-gradient(135deg,#eef2ff 0%,#f0fdf4 100%); border:2px solid #818cf8; border-radius:12px; padding:0.9rem 1rem; margin-bottom:0.75rem;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.55rem;">
+                    <div>
+                      <span style="font-size:0.92rem; font-weight:800; color:#312e81;">🧭 自主學習三階段引導教練（不直接死背答案，一步步帶你自己想通！）</span>
+                    </div>
+                    <button type="button" class="btn btn-primary btn-sm" id="btnGenerateSelfLearningGuide" style="font-size:0.76rem; padding:0.25rem 0.65rem;">
+                      🚀 重新拆解題目與產生提示
+                    </button>
+                  </div>
+
+                  <!-- Stage 1: Question Deconstruction (讀題鷹架：已知條件 vs 所求目標) -->
+                  <div style="background:#ffffff; border:1px solid #c7d2fe; border-radius:8px; padding:0.6rem 0.8rem; margin-bottom:0.55rem; font-size:0.84rem;">
+                    <div style="font-weight:700; color:#4f46e5; margin-bottom:0.25rem;">【階段 1】🔍 題目條件拆解（先看懂題目給了什麼線索、要算什麼目標）：</div>
+                    <div id="slDeconstructContent" style="color:#1e293b; line-height:1.6;">
+                      請在左側框選試卷題目（支援相片與 PDF）或輸入題目文字，系統將自動為你拆解「📌 已知條件」、「🎯 所求目標」與「🧭 核心考點」！
+                    </div>
+                  </div>
+
+                  <!-- Stage 2: 3-Step Progressive Hint Ladder (不破梗階梯式思考提示) -->
+                  <div style="background:#ffffff; border:1px solid #a7f3d0; border-radius:8px; padding:0.6rem 0.8rem; margin-bottom:0.55rem; font-size:0.84rem;">
+                    <div style="font-weight:700; color:#047857; margin-bottom:0.4rem;">
+                      【階段 2】🪜 階梯式思考提示（卡關時點開一步、自己動筆算一步，不直接破梗！）：
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:0.4rem;">
+                      <div>
+                        <button type="button" class="btn btn-secondary btn-sm" id="btnSlHint1" style="width:100%; justify-content:space-between; text-align:left; font-weight:700; color:#1e40af; border-color:#bfdbfe; background:#eff6ff;">
+                          <span>💡 提示 1｜核心觀念與公式喚醒（這題該用哪個定律／公式？）</span>
+                          <span id="iconSlHint1">點擊展開 ▼</span>
+                        </button>
+                        <div id="boxSlHint1" style="display:none; padding:0.5rem 0.75rem; background:#f8fafc; border-left:3px solid #3b82f6; margin-top:0.25rem; color:#1e293b; line-height:1.6;"></div>
+                      </div>
+
+                      <div>
+                        <button type="button" class="btn btn-secondary btn-sm" id="btnSlHint2" style="width:100%; justify-content:space-between; text-align:left; font-weight:700; color:#b45309; border-color:#fde68a; background:#fffbeb;">
+                          <span>🔑 提示 2｜關鍵中間步驟檢查（最容易算錯的中間量在哪裡？）</span>
+                          <span id="iconSlHint2">點擊展開 ▼</span>
+                        </button>
+                        <div id="boxSlHint2" style="display:none; padding:0.5rem 0.75rem; background:#f8fafc; border-left:3px solid #f59e0b; margin-top:0.25rem; color:#1e293b; line-height:1.6;"></div>
+                      </div>
+
+                      <div>
+                        <button type="button" class="btn btn-secondary btn-sm" id="btnSlHint3" style="width:100%; justify-content:space-between; text-align:left; font-weight:700; color:#047857; border-color:#a7f3d0; background:#ecfdf5;">
+                          <span>🎯 提示 3｜完整標準推導與解答核對（自己算完後點此對答案）</span>
+                          <span id="iconSlHint3">點擊展開 ▼</span>
+                        </button>
+                        <div id="boxSlHint3" style="display:none; padding:0.5rem 0.75rem; background:#f8fafc; border-left:3px solid #10b981; margin-top:0.25rem; color:#1e293b; line-height:1.6;"></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Stage 3: Instant Twin Question Self-Test (舉一反三立即自測) -->
+                  <div style="background:#ffffff; border:1px solid #ddd6fe; border-radius:8px; padding:0.6rem 0.8rem; font-size:0.84rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.35rem; margin-bottom:0.3rem;">
+                      <span style="font-weight:700; color:#6d28d9;">【階段 3】⚡ 同觀念「舉一反三」小自測（改個數字／情境，測測看自己真的會了嗎？）：</span>
+                    </div>
+                    <div id="slTwinQuestionText" style="color:#1e293b; font-weight:600; margin-bottom:0.4rem; line-height:1.55;">
+                      框選或輸入題目後，這裡會自動產生一題同觀念的變式練習題供你立即自測！
+                    </div>
+                    <div style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;">
+                      <input type="text" class="form-input" id="inputSlTwinAnswer" placeholder="在此輸入你算出的變式題答案..." style="flex:1; min-width:180px; padding:0.35rem 0.6rem; font-size:0.82rem;" />
+                      <button type="button" class="btn btn-primary btn-sm" id="btnCheckSlTwinAnswer" style="font-size:0.78rem;">✅ 核對變式題答案</button>
+                      <button type="button" class="btn btn-secondary btn-sm" id="btnRevealSlTwinSolution" style="font-size:0.78rem;">👀 看變式題詳解</button>
+                    </div>
+                    <div id="slTwinFeedbackBox" style="display:none; margin-top:0.4rem; padding:0.45rem 0.65rem; border-radius:6px; font-size:0.82rem; line-height:1.55;"></div>
+                  </div>
                 </div>
 
                 <!-- Options A/B/C/D (Automatically hidden when Question Type is Translation / Fill / Calculation!) -->
