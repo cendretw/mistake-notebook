@@ -1307,7 +1307,16 @@ async function preprocessImageForMathOcr(srcDataUrl, leftPrintOnly = false) {
 // Detect whether Tesseract output is 2D math equation gibberish (pipes, random mixed case, isolated CJK fragments)
 function isGibberishMathOcr(text) {
   const s = String(text || '').trim();
-  if (!s) return true;
+  // Empty string is NOT gibberish math OCR!
+  if (!s) return false;
+  // If it looks like normal English text (common English words or standard words without pipes/isolated CJK), never treat as math gibberish!
+  if (
+    /\b(the|and|for|has|have|been|that|with|from|this|which|who|whom|whose|what|when|where|always|never|over|years|company|employee|people|student|because)\b/i.test(
+      s
+    )
+  ) {
+    return false;
+  }
   const pipeCount = (s.match(/[|｜\[\]—―]/g) || []).length;
   const isolatedCjk = (s.match(/(?:^|\s)[\u4e00-\u9fa5](?:\s|$|[|,，])/g) || []).length;
   const mathTokens = (s.match(/[xyabn]\s*[\+\-\^236]|[0-9]\s*[xy]|[+\-=<>]/gi) || []).length;
@@ -1756,13 +1765,13 @@ function parseQuestionAndOptionsFromRawText(rawText) {
     return;
   }
 
-  // Auto-detect subject if math keywords appear
-  if (
-    /lim|sin|cos|tan|極限|高斯|函數|實數|複數|向量|內積|矩陣|數列|機率|方程式|坐標|∠|△|√/.test(
-      cleaned
-    )
-  ) {
+  // Auto-detect subject accurately (never mistake English words like 'limit'/'since'/'cost'/'important' for Math!)
+  if (isExplicitMathText(cleaned)) {
     document.getElementById('fieldSubject').value = '數學';
+    syncSubjectSpecificUI();
+  } else if (isPredominantlyEnglishText(cleaned)) {
+    document.getElementById('fieldSubject').value = '英文';
+    syncSubjectSpecificUI();
   }
 
   // 1. Check if the cropped region contains multiple Cloze option rows like "( ) 19. (A)... ( ) 20. (A)..."
@@ -2223,13 +2232,28 @@ function initMistakeForm() {
     });
   });
 
-  // Initialize Autonomous Self-Directed Learning Coach controls
+  // Quick Subject Switcher Pills (#subjectQuickPills)
+  document.querySelectorAll('#subjectQuickPills .subject-pill').forEach((pill) => {
+    pill.addEventListener('click', () => {
+      const subj = pill.getAttribute('data-subj') || '英文';
+      const subjInput = document.getElementById('fieldSubject');
+      if (subjInput) subjInput.value = subj;
+      syncSubjectSpecificUI();
+      updateSelfLearningCoach(false);
+      runAutoMistakeDiagnosis(true);
+      showToast(`📚 已切換為「${subj}科」專屬清爽版面與三階段引導！`);
+    });
+  });
+
+  // Initialize Autonomous Self-Directed Learning Coach controls & Subject UI
   initSelfLearningCoach();
+  syncSubjectSpecificUI();
 
   // Auto-split stem and options button
   document.getElementById('btnParseRawQuestion').addEventListener('click', () => {
     const raw = document.getElementById('fieldQuestionText').value;
     parseQuestionAndOptionsFromRawText(raw);
+    syncSubjectSpecificUI();
     updateSelfLearningCoach();
     runAutoMistakeDiagnosis(true);
     showToast('✨ 已整理題目格式並更新自主學習引導與診斷！');
@@ -2246,6 +2270,12 @@ function initMistakeForm() {
     const el = document.getElementById(id);
     if (el) {
       el.addEventListener('input', () => {
+        if (id === 'fieldSubject') {
+          syncSubjectSpecificUI();
+        } else {
+          // If the user typed or pasted an English question/options while another subject was selected, auto-sync to English!
+          autoDetectSubjectFromInputs();
+        }
         updateSelfLearningCoach();
         runAutoMistakeDiagnosis(true);
       });
@@ -2383,6 +2413,244 @@ function initMistakeForm() {
   });
 }
 
+function isExplicitMathText(text) {
+  const s = String(text || '').trim();
+  if (!s) return false;
+  // Never match plain English sentences containing substrings like 'limit', 'since', 'cost', 'important'!
+  if (
+    /極限|高斯符號|夾擠|複數平面|正實數|向量|內積|矩陣|數列|多項式|方程式|坐標|三角函數|微積分|導數|∠|△|√|x²|x³/.test(
+      s
+    )
+  ) {
+    return true;
+  }
+  if (/\blim\s*\(|\bsin\s*(?:ax|x|θ|∠)|\bcos\s*(?:ax|x|θ|∠)|\btan\s*(?:ax|x|θ|∠)/i.test(s)) {
+    return true;
+  }
+  return false;
+}
+
+function isPredominantlyEnglishText(text) {
+  const s = String(text || '').trim();
+  if (!s || s.length < 6) return false;
+  if (isExplicitMathText(s) || isGibberishMathOcr(s)) return false;
+  const cjkCount = (s.match(/[\u4e00-\u9fa5]/g) || []).length;
+  const asciiWords = s.match(/\b[A-Za-z]{3,}\b/g) || [];
+  return cjkCount <= 2 && asciiWords.length >= 2;
+}
+
+function autoDetectSubjectFromInputs() {
+  const subjEl = document.getElementById('fieldSubject');
+  if (!subjEl) return;
+  const stem = document.getElementById('fieldQuestionText')?.value.trim() || '';
+  const opts = {
+    A: document.getElementById('fieldOptA')?.value.trim() || '',
+    B: document.getElementById('fieldOptB')?.value.trim() || '',
+    C: document.getElementById('fieldOptC')?.value.trim() || '',
+    D: document.getElementById('fieldOptD')?.value.trim() || ''
+  };
+
+  if (
+    (isPredominantlyEnglishText(stem) || isEnglishOptionSet(opts)) &&
+    !isExplicitMathText(`${stem} ${opts.A} ${opts.B}`)
+  ) {
+    if (subjEl.value !== '英文') {
+      subjEl.value = '英文';
+    }
+    syncSubjectSpecificUI();
+  } else if (isExplicitMathText(stem)) {
+    if (subjEl.value === '英文') {
+      subjEl.value = '數學';
+    }
+    syncSubjectSpecificUI();
+  }
+}
+
+// Dynamically adapts the entire form UI so English students NEVER see Math clutter, and Math students see Math tools!
+function syncSubjectSpecificUI() {
+  const subject =
+    document.getElementById('fieldSubject')?.value.trim() || '英文';
+  const isEnglish = /英文|English/i.test(subject);
+  const isMath = /數學|Math/i.test(subject);
+  const isSci = /物理|化學|理化|自然|地科|地球科學/.test(subject);
+  const isMathOrSci = isMath || isSci;
+
+  // 1. Highlight active subject pill
+  document
+    .querySelectorAll('#subjectQuickPills .subject-pill')
+    .forEach((pill) => {
+      pill.classList.toggle(
+        'active',
+        pill.getAttribute('data-subj') === subject
+      );
+    });
+
+  // 2. Show/Hide Math & Science toolbars (Completely hidden for English!)
+  const mathSymBar = document.getElementById('mathSymbolToolbar');
+  if (mathSymBar) {
+    mathSymBar.style.display = isMathOrSci ? 'flex' : 'none';
+  }
+  const mathTopicBar = document.getElementById('mathTopicQuickBar');
+  if (mathTopicBar) {
+    mathTopicBar.style.display = isMath ? 'flex' : 'none';
+  }
+  const btnLeftOcr = document.getElementById('btnOcrLeftPrintOnly');
+  if (btnLeftOcr) {
+    btnLeftOcr.style.display = isMathOrSci ? 'inline-flex' : 'none';
+  }
+
+  // 3. Adapt Question Type button texts cleanly to the subject
+  const qChoice = document.getElementById('qtypeBtnChoice');
+  const qMulti = document.getElementById('qtypeBtnMulti');
+  const qFill = document.getElementById('qtypeBtnFill');
+  const qTrans = document.getElementById('qtypeBtnTrans');
+  const qRead = document.getElementById('qtypeBtnReading');
+  if (isEnglish) {
+    if (qChoice) qChoice.textContent = '🔘 單字／文法單選／克漏字';
+    if (qMulti) qMulti.textContent = '☑️ 多選題';
+    if (qFill) qFill.textContent = '🔤 文意字彙／詞性填空';
+    if (qTrans) qTrans.textContent = '✍️ 中翻英／手寫簡答';
+    if (qRead) qRead.textContent = '📖 閱讀測驗／篇章結構';
+  } else if (isMath) {
+    if (qChoice) qChoice.textContent = '🔘 單選題';
+    if (qMulti) qMulti.textContent = '☑️ 多選題（1~5／A~E）';
+    if (qFill) qFill.textContent = '🔢 選填／填充計算題';
+    if (qTrans) qTrans.textContent = '✍️ 計算證明／非選題';
+    if (qRead) qRead.textContent = '📊 混合題組／圖表題';
+  } else {
+    if (qChoice) qChoice.textContent = '🔘 單選題';
+    if (qMulti) qMulti.textContent = '☑️ 多選題';
+    if (qFill) qFill.textContent = '🔤 填充／計算題';
+    if (qTrans) qTrans.textContent = '✍️ 簡答／非選題';
+    if (qRead) qRead.textContent = '📖 圖表／閱讀題組';
+  }
+
+  // 4. Adapt Option fields (A~D vs 1~5) and hide 5th option E for standard 4-choice English questions
+  const hasOptEVal = Boolean(
+    document.getElementById('fieldOptE')?.value.trim()
+  );
+  const showFifthOpt =
+    state.questionType === 'multiselect' || isMath || hasOptEVal;
+  const groupOptE = document.getElementById('groupOptE');
+  if (groupOptE) {
+    groupOptE.style.display = showFifthOpt ? 'block' : 'none';
+  }
+
+  const useNum = isMath && state.questionType === 'multiselect';
+  ['A', 'B', 'C', 'D', 'E'].forEach((letter, idx) => {
+    const num = String(idx + 1);
+    const lbl = document.getElementById(`labelOpt${letter}`);
+    const inp = document.getElementById(`fieldOpt${letter}`);
+    if (lbl) {
+      lbl.textContent = useNum
+        ? `選項 (${num})`
+        : isMath
+        ? `選項 (${letter}) / (${num})`
+        : `選項 (${letter})`;
+    }
+    if (inp && letter !== 'E') {
+      inp.placeholder = useNum
+        ? `選項 (${num}) 內容`
+        : `選項 ${letter} 內容`;
+    }
+  });
+
+  // Update STEP 2 Option Pill labels and visibility of 5th pill E
+  ['wrongOptionPills', 'correctOptionPills'].forEach((cid) => {
+    document.querySelectorAll(`#${cid} .option-pill`).forEach((btn) => {
+      const val = btn.getAttribute('data-val');
+      const num = btn.getAttribute('data-num');
+      if (val === 'E') {
+        btn.style.display = showFifthOpt ? 'inline-flex' : 'none';
+      }
+      btn.textContent = useNum ? num : isMath ? `${val} / ${num}` : val;
+    });
+  });
+
+  // 5. Adapt STEP 3 Error Diagnosis Tags so English hides "計算粗心" and Math hides "文法/單字"
+  const tagGrammar = document.getElementById('errTagGrammar');
+  const tagVocab = document.getElementById('errTagVocab');
+  const tagCalc = document.getElementById('errTagCalc');
+  const tagConcept = document.getElementById('errTagConcept');
+  if (tagGrammar) {
+    tagGrammar.style.display = isMathOrSci ? 'none' : 'inline-flex';
+  }
+  if (tagVocab) {
+    tagVocab.style.display = isMathOrSci ? 'none' : 'inline-flex';
+  }
+  if (tagCalc) {
+    tagCalc.style.display = isMathOrSci ? 'inline-flex' : 'none';
+  }
+  if (tagConcept) {
+    tagConcept.textContent = isMathOrSci
+      ? '🧠 觀念混淆（公式／定理搞混）'
+      : '🧠 觀念混淆（前後文邏輯誤判）';
+  }
+
+  // 6. Adapt 3-Stage Autonomous Learning Coach titles & badge to match the Subject
+  const coachBadge = document.getElementById('slCoachSubjectBadge');
+  const stg1Title = document.getElementById('slStage1Title');
+  const h1Label = document.getElementById('labelSlHint1');
+  const h2Label = document.getElementById('labelSlHint2');
+  const h3Label = document.getElementById('labelSlHint3');
+  const stg3Title = document.getElementById('slStage3Title');
+  const twinInput = document.getElementById('inputSlTwinAnswer');
+
+  if (coachBadge) {
+    coachBadge.textContent = `${subject}科專屬引導`;
+  }
+  if (isEnglish) {
+    if (stg1Title)
+      stg1Title.textContent =
+        '【階段 1】🔍 題目語境與線索拆解（整句中譯、前後文關鍵字與核心考點）：';
+    if (h1Label)
+      h1Label.textContent =
+        '💡 提示 1｜上下文語境線索與空格詞性判斷';
+    if (h2Label)
+      h2Label.textContent =
+        '🔑 提示 2｜各選項單字中文意思、詞性與同義詞對照';
+    if (h3Label)
+      h3Label.textContent =
+        '🎯 提示 3｜完整語意對比與標準解答核對';
+    if (stg3Title)
+      stg3Title.textContent =
+        '【階段 3】⚡ 核心單字／句型「舉一反三」小自測：';
+    if (twinInput)
+      twinInput.placeholder = '在此輸入應填的英文單字或答案...';
+  } else if (isMathOrSci) {
+    if (stg1Title)
+      stg1Title.textContent =
+        '【階段 1】🔍 題目條件拆解（先看懂題目給了什麼已知條件、要算什麼目標）：';
+    if (h1Label)
+      h1Label.textContent =
+        '💡 提示 1｜核心觀念與公式喚醒（這題該用哪個定律／公式？）';
+    if (h2Label)
+      h2Label.textContent =
+        '🔑 提示 2｜關鍵中間步驟檢查（最容易算錯的中間量在哪裡？）';
+    if (h3Label)
+      h3Label.textContent =
+        '🎯 提示 3｜完整標準推導與解答核對（自己算完後點此對答案）';
+    if (stg3Title)
+      stg3Title.textContent =
+        '【階段 3】⚡ 同觀念「舉一反三」小自測（改個數字，測測看自己真的會了嗎？）：';
+    if (twinInput)
+      twinInput.placeholder = '在此輸入你算出的變式題答案...';
+  } else {
+    if (stg1Title)
+      stg1Title.textContent = `【階段 1】🔍 ${subject}題幹關鍵字與條件拆解：`;
+    if (h1Label)
+      h1Label.textContent = '💡 提示 1｜核心判讀指標與背景觀念喚醒';
+    if (h2Label)
+      h2Label.textContent = '🔑 提示 2｜誘答選項排除與關鍵條件比對';
+    if (h3Label)
+      h3Label.textContent = '🎯 提示 3｜完整推論邏輯與標準答案核對';
+    if (stg3Title)
+      stg3Title.textContent = '【階段 3】⚡ 同觀念「舉一反三」小自測：';
+    if (twinInput)
+      twinInput.placeholder = '在此輸入你的自測答案...';
+  }
+}
+
 function setQuestionTypeUI(qType) {
   state.questionType = qType || 'choice';
   document
@@ -2393,6 +2661,10 @@ function setQuestionTypeUI(qType) {
         btn.getAttribute('data-qtype') === state.questionType
       );
     });
+
+  const subject =
+    document.getElementById('fieldSubject')?.value.trim() || '英文';
+  const isEnglish = /英文|English/i.test(subject);
 
   const isChoiceLike =
     state.questionType === 'choice' ||
@@ -2411,45 +2683,71 @@ function setQuestionTypeUI(qType) {
   if (wrongPills) wrongPills.style.display = isChoiceLike ? 'flex' : 'none';
   if (correctPills) correctPills.style.display = isChoiceLike ? 'flex' : 'none';
 
+  syncSubjectSpecificUI();
+
   if (state.questionType === 'multiselect') {
     if (labelWrong)
       labelWrong.textContent =
-        '❌ 我當初選的選項（多選：可點多個按鈕，如 2 或 1, 2）';
+        '❌ 我當初選的選項（多選：可點多個按鈕）';
     if (labelCorrect)
       labelCorrect.textContent =
-        '✅ 試卷正確多選答案（可點多個按鈕，如 2, 5 或 B, E）';
+        '✅ 試卷正確多選答案（可點多個按鈕）';
     if (wrongInput)
-      wrongInput.placeholder = '點上方多個按鈕（1~5 或 A~E）或輸入如 2 或 1,3';
+      wrongInput.placeholder = '點上方多個按鈕或直接輸入';
     if (correctInput)
-      correctInput.placeholder = '點上方多個按鈕（1~5 或 A~E）或輸入如 2, 5 或 B, E';
+      correctInput.placeholder = '點上方多個按鈕或直接輸入';
     if (diffBox) diffBox.style.display = 'none';
   } else if (state.questionType === 'translation') {
-    if (labelWrong) labelWrong.textContent = '❌ 我當初寫錯的翻譯／簡答內容';
-    if (labelCorrect) labelCorrect.textContent = '✅ 標準參考翻譯／正確解答';
+    if (labelWrong)
+      labelWrong.textContent = isEnglish
+        ? '❌ 我當初寫錯的英文翻譯／句子'
+        : '❌ 我當初寫錯的簡答／非選內容';
+    if (labelCorrect)
+      labelCorrect.textContent = isEnglish
+        ? '✅ 標準英文翻譯解答'
+        : '✅ 標準參考解答';
     if (wrongInput)
-      wrongInput.placeholder =
-        '請輸入你當時寫的翻譯句子或簡答（例如：It spend the company 3 years...）';
+      wrongInput.placeholder = isEnglish
+        ? '例如：It spend the company 3 years...'
+        : '請輸入你當時寫的答案...';
     if (correctInput)
-      correctInput.placeholder =
-        '請輸入正確的標準翻譯或解答（例如：It took the company three years to...）';
+      correctInput.placeholder = isEnglish
+        ? '例如：It took the company three years to...'
+        : '請輸入標準正確解答...';
   } else if (state.questionType === 'fill') {
-    if (labelWrong) labelWrong.textContent = '❌ 我填錯的單字／算錯的答案';
-    if (labelCorrect) labelCorrect.textContent = '✅ 正確單字／標準計算結果';
+    if (labelWrong)
+      labelWrong.textContent = isEnglish
+        ? '❌ 我填錯的英文單字／詞性變化'
+        : '❌ 我算錯／填錯的答案';
+    if (labelCorrect)
+      labelCorrect.textContent = isEnglish
+        ? '✅ 正確英文單字'
+        : '✅ 標準正確答案';
     if (wrongInput)
-      wrongInput.placeholder = '例如：拼錯的單字 poison 或算錯的數值 3√6/2';
+      wrongInput.placeholder = isEnglish
+        ? '例如：填錯的單字 poison 或 potential'
+        : '例如：算錯的數值或填充答案';
     if (correctInput)
-      correctInput.placeholder = '例如：正確單字 poisonous 或正確數值 3√3/2';
+      correctInput.placeholder = isEnglish
+        ? '例如：正確單字 poisonous 或 faithful'
+        : '例如：標準正確答案';
   } else if (state.questionType === 'reading') {
-    if (labelWrong) labelWrong.textContent = '❌ 我誤選的閱讀／圖表題選項';
+    if (labelWrong) labelWrong.textContent = '❌ 我誤選的選項';
     if (labelCorrect) labelCorrect.textContent = '✅ 正確答案選項';
-    if (wrongInput) wrongInput.placeholder = '點上方 A/B/C/D 或輸入誤選答案';
-    if (correctInput) wrongInput && (correctInput.placeholder = '點上方 A/B/C/D 或輸入正確答案');
+    if (wrongInput) wrongInput.placeholder = '點選上方 A/B/C/D 或輸入誤選答案';
+    if (correctInput) correctInput.placeholder = '點選上方 A/B/C/D 或輸入正確答案';
     if (diffBox) diffBox.style.display = 'none';
   } else {
     if (labelWrong) labelWrong.textContent = '❌ 我當初選錯的答案';
     if (labelCorrect) labelCorrect.textContent = '✅ 試卷正確答案';
-    if (wrongInput) wrongInput.placeholder = '點上方 A~E / 1~5 或輸入誤選答案';
-    if (correctInput) correctInput.placeholder = '點上方 A~E / 1~5 或輸入正確答案';
+    if (wrongInput)
+      wrongInput.placeholder = isEnglish
+        ? '點選上方 A / B / C / D 或輸入誤選答案'
+        : '點選上方按鈕或輸入誤選答案';
+    if (correctInput)
+      correctInput.placeholder = isEnglish
+        ? '點選上方 A / B / C / D 或輸入正確答案'
+        : '點選上方按鈕或輸入正確答案';
     if (diffBox) diffBox.style.display = 'none';
   }
 
@@ -3155,7 +3453,7 @@ function initSelfLearningCoach() {
 
 function updateSelfLearningCoach(autoExpandFirstHint = false) {
   let subject =
-    document.getElementById('fieldSubject')?.value.trim() || '數學';
+    document.getElementById('fieldSubject')?.value.trim() || '英文';
   const unit =
     document.getElementById('fieldUnit')?.value.trim() || '';
   let stem =
@@ -3164,13 +3462,26 @@ function updateSelfLearningCoach(autoExpandFirstHint = false) {
     document.getElementById('fieldWrongAnswer')?.value.trim() || '';
   const correctAns =
     document.getElementById('fieldCorrectAnswer')?.value.trim() || '';
+  const optsCheck = {
+    A: document.getElementById('fieldOptA')?.value.trim() || '',
+    B: document.getElementById('fieldOptB')?.value.trim() || '',
+    C: document.getElementById('fieldOptC')?.value.trim() || '',
+    D: document.getElementById('fieldOptD')?.value.trim() || ''
+  };
 
-  // Never allow noisy math OCR or math symbols to be misclassified as English!
+  // Accurate subject sync: English questions stay in English; explicit Math formulas switch to Math
   if (
+    (isPredominantlyEnglishText(stem) || isEnglishOptionSet(optsCheck)) &&
+    !isExplicitMathText(`${stem} ${optsCheck.A} ${optsCheck.B}`)
+  ) {
+    subject = '英文';
+    const subjEl = document.getElementById('fieldSubject');
+    if (subjEl && subjEl.value !== '英文') {
+      subjEl.value = '英文';
+    }
+  } else if (
     isGibberishMathOcr(stem) ||
-    /lim|極限|高斯|夾擠|複數|向量|三角|sin|cos|tan|∠|△|√|x²|x³/.test(
-      `${unit} ${stem} ${wrongAns} ${correctAns}`
-    )
+    isExplicitMathText(`${stem} ${wrongAns} ${correctAns}`)
   ) {
     subject = '數學';
     const subjEl = document.getElementById('fieldSubject');
@@ -3182,6 +3493,9 @@ function updateSelfLearningCoach(autoExpandFirstHint = false) {
     }
   }
 
+  syncSubjectSpecificUI();
+
+  const isMathSubject = /數學|Math/i.test(subject);
   const combined = `${subject} ${unit} ${stem} ${wrongAns} ${correctAns}`;
 
   const deconstructEl = document.getElementById('slDeconstructContent');
@@ -3201,7 +3515,12 @@ function updateSelfLearningCoach(autoExpandFirstHint = false) {
   let twinQ = '';
 
   // 0A. High School Math: Question 3 Function Limits (3.(1)~3.(5) & General Limits / Squeeze Theorem / Gauss Bracket)
-  if (/極限|lim|高斯符號|夾擠|1\s*-\s*x²⁰|2x\s*-\s*17|2x\s*-\s*3|3x\s*-\s*2/.test(combined)) {
+  if (
+    isMathSubject &&
+    /極限|\blim\b|高斯符號|夾擠|1\s*-\s*x²⁰|2x\s*-\s*17|2x\s*-\s*3|3x\s*-\s*2/.test(
+      combined
+    )
+  ) {
     if (/2x\s*-\s*17|7x\s*\+\s*6/.test(combined)) {
       deconstructHtml = `
         <div>📌 <strong>已知條件（Given）：</strong>當 <b>x → 6</b> 時，兩分式分母 <code>x² - 7x + 6 = (x - 1)(x - 6)</code> 與 <code>x - 6</code> 皆趨近於 0（屬於 <b>∞ - ∞ 不定型</b>）。</div>
@@ -3276,7 +3595,7 @@ function updateSelfLearningCoach(autoExpandFirstHint = false) {
     }
   }
   // 0B. High School Math: Trigonometric Function Graph & Law of Cosines Multi-Select (y = sin ax + cos ax, cos∠APC = -1/√33)
-  else if (/sin\s*ax|cos\s*ax|APC/.test(combined)) {
+  else if (isMathSubject && /sin\s*ax|cos\s*ax|APC/.test(combined)) {
     deconstructHtml = `
       <div>📌 <strong>已知條件（Given）：</strong>a &gt; 0，函數 <b>y = sin ax + cos ax = √2 sin(ax + π/4)</b>；P 為最高點（故高為振幅 <b>√2</b>），A、B、C 為與 x 軸連續三個交點，且 <b>cos∠APC = -1/√33</b>。</div>
       <div>🎯 <strong>所求目標（Goal）：</strong>逐一檢驗多選題 (1)~(5)：① P 到 x 軸距離 ② tan∠APC ③ △APC 面積 ④ a 的值 ⑤ B 點坐標。</div>
@@ -3292,7 +3611,10 @@ function updateSelfLearningCoach(autoExpandFirstHint = false) {
     };
   }
   // 1. High School Math: Complex Plane & Polar Form (複數平面、極式、主幅角、△AOB面積)
-  else if (/複數|極式|AOB|\b\d+\s*\+\s*√?\d*i\b|β\/α/.test(combined)) {
+  else if (
+    isMathSubject &&
+    /複數|極式|AOB|\b\d+\s*\+\s*√?\d*i\b|β\/α/.test(combined)
+  ) {
     deconstructHtml = `
       <div>📌 <strong>已知條件（Given）：</strong>複數平面上原點為 O，點 A(α)、B(β) 滿足 <b>|α| = √3</b>（代表線段 OA 長度 = √3），且 <b>β/α = 1 + √3 i</b>（代表向量 OA 旋轉並伸縮得到向量 OB）。</div>
       <div>🎯 <strong>所求目標（Goal）：</strong>求兩向量夾角 <b>∠AOB</b> 以及三角形 <b>△AOB 的面積</b>。</div>
@@ -3308,9 +3630,9 @@ function updateSelfLearningCoach(autoExpandFirstHint = false) {
     };
   }
   // 2. Math: Quadratic / Algebra / Polynomials / Calculus / Trigonometry / Vectors
-  else if (/數學/.test(subject) || /方程式|函數|向量|內積|三角|sin|cos|面積|機率|排列|數列|矩陣|微積分/.test(combined)) {
+  else if (isMathSubject) {
     deconstructHtml = `
-      <div>📌 <strong>已知條件（Given）：</strong>${escapeHtml(stem ? stem.slice(0, 95) : '題幹給定的代數關係式／幾何條件')}</div>
+      <div>📌 <strong>已知條件（Given）：</strong>${escapeHtml(stem ? stem.slice(0, 95) : '題幹給定的代數關係式／幾何條件（亦可點上方「📐 數學考點快選」切換單元）')}</div>
       <div>🎯 <strong>所求目標（Goal）：</strong>利用數學公式將已知條件轉化為目標未知數或幾何量（標準答案：${escapeHtml(correctAns || '待推導')}）。</div>
       <div>🧭 <strong>核心考點（Topic）：</strong>數學科｜公式轉換、中間量求解與正負號／根號化簡。</div>
     `;
@@ -3326,11 +3648,11 @@ function updateSelfLearningCoach(autoExpandFirstHint = false) {
   // 3. Physics / Chemistry / Natural Sciences
   else if (/物理|化學|自然|理化|生物|地科|地球科學/.test(subject)) {
     deconstructHtml = `
-      <div>📌 <strong>已知條件（Given）：</strong>${escapeHtml(stem ? stem.slice(0, 95) : '題幹給定的物理／化學實驗條件與數據')}</div>
-      <div>🎯 <strong>所求目標（Goal）：</strong>判斷目標物理量／化學計量結果（注意單位是否需換算為標準 SI 制）。</div>
+      <div>📌 <strong>已知條件（Given）：</strong>${escapeHtml(stem ? stem.slice(0, 95) : '題幹給定的物理／化學／生物實驗條件與數據')}</div>
+      <div>🎯 <strong>所求目標（Goal）：</strong>判斷目標物理量／化學計量／生物特徵結果（注意單位是否需換算為標準 SI 制）。</div>
       <div>🧭 <strong>核心考點（Topic）：</strong>${escapeHtml(subject)}｜定律公式套用、方向正負號與圖表座標軸判讀。</div>
     `;
-    hint1 = `先圈出題幹中的「限定條件」（例如：等速＝合力為0、減速＝加速度與速度反向、定溫、完全反應）以及「單位」（cm 換 m、g 換 मो耳數、mL 換 L）。`;
+    hint1 = `先圈出題幹中的「限定條件」（例如：等速＝合力為0、減速＝加速度與速度反向、定溫、完全反應）以及「單位」（cm 換 m、g 換莫耳數、mL 換 L）。`;
     hint2 = getSubjectFormulaGuidance(subject, stem, correctAns);
     hint3 = `【完整檢核與正解】：\n將換算後的標準單位數據代入上述定律求解，並確認題目最後問的是「何者正確」還是「何者錯誤」。\n標準答案：${correctAns || '請輸入正解'}（你原本的答案：${wrongAns || '尚未輸入'}）。`;
     twinQ = `【舉一反三自測】一質量 2 kg 的物體在光滑水平面上受定力作用，以 4 m/s 的速率運動，請問此時物體的動能 Ek (= 1/2 mv²) 為多少焦耳 (J)？（只填數字即可）`;
@@ -3353,6 +3675,22 @@ function updateSelfLearningCoach(autoExpandFirstHint = false) {
     currentTwinQuizSolution = {
       expectedAnswers: ['溫帶地中海型氣候', '地中海型氣候', '地中海型', '溫帶地中海型'],
       explanation: `1月最熱代表位於「南半球」；7月為南半球冬季且降雨集中，屬於典型的「夏乾冬雨＝溫帶地中海型氣候」！`
+    };
+  }
+  // 4B. Chinese Literature / Reading Comprehension (國文)
+  else if (/國文|國語/.test(subject)) {
+    deconstructHtml = `
+      <div>📌 <strong>文意與字詞線索：</strong>${escapeHtml(stem ? stem.slice(0, 95) : '抓出題幹引文的轉折詞（然、卻、蓋、惟）、主語與情感基調')}</div>
+      <div>🎯 <strong>所求目標（Goal）：</strong>辨析字音字形、成語褒貶、文言虛詞或段落核心主旨。</div>
+      <div>🧭 <strong>核心考點（Topic）：</strong>國文科｜文意推論、古今字義對比與修辭／成語判讀。</div>
+    `;
+    hint1 = `閱讀古文或白話長文時，先圈出「轉折詞（然而、抑或、殊不知、實則）」與「結尾議論文句」，作者真正的主張通常在轉折詞之後！`;
+    hint2 = `檢查誘答選項常見陷阱：① 望文生義（古今字義不同） ② 過度推論（原文未提及的因果關係） ③ 成語褒貶或使用對象錯誤。`;
+    hint3 = `【標準正解核對】：正確答案為「${correctAns || '請輸入正解'}」（對照你原本選的「${wrongAns || '尚未輸入'}」，將該字詞或成語原意記進避坑錦囊）。`;
+    twinQ = `【舉一反三自測】成語「不刊之論」中的「刊」字，原意是指什麼？（提示：古代刻字於竹簡，錯了就削去修改；不可削改代表言論極為確當。請填「削除」或「修改」）`;
+    currentTwinQuizSolution = {
+      expectedAnswers: ['削除', '修改', '削改', '砍削'],
+      explanation: `「刊」原意為削除、修改！「不刊之論」指不可磨滅、不可修改的至理名言（常被誤以為是不能刊登，千萬別望文生義喔）！`
     };
   }
   // 5. English (Vocabulary / Cloze / Grammar / Translation / Reading)
@@ -4482,6 +4820,9 @@ function resetMistakeForm(keepMetadata = false) {
     .forEach((b) => b.classList.remove('selected'));
   document.getElementById('btnSubmitMistake').textContent =
     '✅ 看懂了！存入錯題本與試算表';
+
+  syncSubjectSpecificUI();
+  updateSelfLearningCoach(false);
 }
 
 // ============================================================================
@@ -4581,7 +4922,7 @@ function buildMistakeCardHtml(m, includeFooterButtons = true) {
   const footerHtml = includeFooterButtons
     ? `<div class="mcard-footer-actions">
         <div style="font-size:0.78rem; color:#64748b;">
-          建立：${escapeHtml(m.createdAt)}｜已練習 ${m.practiceCount} 次（答對 ${m.correctCount} 次）
+          建立：${escapeHtml(m.createdAt)}｜已練習 ${m.practiceCount} 次（答對 ${m.correctCount} 次）｜<strong style="color:#4f46e5;">Made by Daphne Lin</strong>
         </div>
         <div style="display:flex; gap:0.4rem;">
           <button class="btn btn-secondary btn-sm" onclick="editMistakeById('${m.id}')">✏️ 編輯</button>
@@ -4590,7 +4931,7 @@ function buildMistakeCardHtml(m, includeFooterButtons = true) {
         </div>
       </div>`
     : `<div style="padding:0.65rem 1.15rem; background:#f8fafc; border-top:1px solid #e2e8f0; display:flex; justify-content:space-between; font-size:0.78rem; color:#64748b;">
-        <span>📘 錯題進化論｜${escapeHtml(state.sheetName)}</span>
+        <span>📘 錯題進化論｜${escapeHtml(state.sheetName)}｜<strong style="color:#4f46e5;">✨ Made by Daphne Lin</strong></span>
         <span>記錄日期：${escapeHtml(m.createdAt)}｜熟練度：${escapeHtml(m.masteryStatus)}</span>
       </div>`;
 

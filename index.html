@@ -26,8 +26,11 @@
       <div class="brand">
         <div class="brand-icon">📘</div>
         <div>
-          <div class="brand-title">錯題進化論 Mistake Mastery</div>
-          <div class="brand-subtitle">PDF 試卷框選 × 互動式錯題診斷 × PNG 錯題卡 × 強化再練習 × Excel / Google 試算表無縫接軌</div>
+          <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
+            <span class="brand-title">錯題進化論 Mistake Mastery</span>
+            <span class="author-credit-pill">✨ Made by Daphne Lin</span>
+          </div>
+          <div class="brand-subtitle">試卷框選 × 自主學習引導 × 錯題診斷卡 × 強化再練習 × 試算表同步</div>
         </div>
       </div>
 
@@ -72,8 +75,9 @@
       </button>
       <button class="nav-tab" data-tab="tab-sheet">
         <span class="tab-step-num">4</span>
-        <span>📊 試算表總覽與匯出 (Excel / Google 試算表)</span>
+        <span>📊 試算表總覽與匯出</span>
       </button>
+      <div class="nav-author-tag">✨ Made by Daphne Lin</div>
     </div>
   </nav>
 
@@ -211,26 +215,30 @@
               <!-- Step 1: 題目基本資訊與內容 -->
               <div class="form-section">
                 <div class="section-badge-title" style="flex-wrap:wrap; gap:0.4rem;">
-                  <span>STEP 1｜選擇題型 ＆ 題目內容</span>
-                  <span style="font-size:0.78rem; color:#64748b; font-weight:500;">框選試卷時會自動判別題型，亦可手動切換</span>
+                  <span>STEP 1｜選擇科目、題型 ＆ 題目內容</span>
+                  <span style="font-size:0.78rem; color:#64748b; font-weight:500;">版面與引導會隨科目自動切換</span>
                 </div>
 
-                <!-- Question Type Switcher -->
-                <div class="form-group" style="margin-bottom:0.85rem;">
-                  <label class="form-label">🎯 本題題型（支援單選、多選 1~5/A~E、翻譯手寫、填充計算、閱讀圖表，全科適用！）</label>
-                  <div class="error-tags-grid" id="questionTypeContainer" style="margin-bottom:0;">
-                    <button type="button" class="diagnosis-tag selected" data-qtype="choice">🔘 單選題／克漏字</button>
-                    <button type="button" class="diagnosis-tag" data-qtype="multiselect">☑️ 多選題（1~5／A~E）</button>
-                    <button type="button" class="diagnosis-tag" data-qtype="fill">🔤 文意字彙／填充／理化數學計算</button>
-                    <button type="button" class="diagnosis-tag" data-qtype="translation">✍️ 翻譯／簡答／手寫非選題</button>
-                    <button type="button" class="diagnosis-tag" data-qtype="reading">📖 閱讀測驗／地理圖表題組</button>
+                <!-- Quick Subject Selector Bar -->
+                <div class="form-group" style="margin-bottom:0.65rem;">
+                  <label class="form-label" style="margin-bottom:0.3rem;">📚 快速切換科目（點選後自動切換專屬介面與三階段引導）</label>
+                  <div class="subject-quick-pills" id="subjectQuickPills">
+                    <button type="button" class="subject-pill active" data-subj="英文">🔤 英文</button>
+                    <button type="button" class="subject-pill" data-subj="數學">📐 數學</button>
+                    <button type="button" class="subject-pill" data-subj="國文">📖 國文</button>
+                    <button type="button" class="subject-pill" data-subj="物理">⚡ 物理</button>
+                    <button type="button" class="subject-pill" data-subj="化學">🧪 化學</button>
+                    <button type="button" class="subject-pill" data-subj="生物">🧬 生物</button>
+                    <button type="button" class="subject-pill" data-subj="地理">🌍 地理</button>
+                    <button type="button" class="subject-pill" data-subj="歷史">🏛️ 歷史</button>
+                    <button type="button" class="subject-pill" data-subj="公民">⚖️ 公民</button>
                   </div>
                 </div>
 
-                <div class="form-row">
+                <div class="form-row" style="margin-bottom:0.75rem;">
                   <div class="form-group">
-                    <label class="form-label">科目</label>
-                    <input type="text" class="form-input" id="fieldSubject" list="subjectList" placeholder="例如：英文、物理、化學、地理" value="英文" required />
+                    <label class="form-label">科目名稱</label>
+                    <input type="text" class="form-input" id="fieldSubject" list="subjectList" placeholder="例如：英文" value="英文" required />
                     <datalist id="subjectList">
                       <option value="英文"></option>
                       <option value="國文"></option>
@@ -248,28 +256,40 @@
 
                   <div class="form-group">
                     <label class="form-label">試卷名稱 / 單元</label>
-                    <input type="text" class="form-input" id="fieldUnit" placeholder="例如：U7 進階卷 / 牛頓運動定律 / 氣候與水文" value="段考複習卷" />
+                    <input type="text" class="form-input" id="fieldUnit" placeholder="例如：U7 單字與克漏字" value="段考複習卷" />
                   </div>
 
-                  <div class="form-group" style="max-width:120px;">
+                  <div class="form-group" style="max-width:110px;">
                     <label class="form-label">題號</label>
-                    <input type="text" class="form-input" id="fieldQuestionNum" placeholder="例如：19" required />
+                    <input type="text" class="form-input" id="fieldQuestionNum" placeholder="例如：1" required />
+                  </div>
+                </div>
+
+                <!-- Question Type Switcher (Labels adapt cleanly to Subject) -->
+                <div class="form-group" style="margin-bottom:0.75rem;">
+                  <label class="form-label">🎯 本題題型</label>
+                  <div class="error-tags-grid" id="questionTypeContainer" style="margin-bottom:0;">
+                    <button type="button" class="diagnosis-tag selected" data-qtype="choice" id="qtypeBtnChoice">🔘 單選題／克漏字</button>
+                    <button type="button" class="diagnosis-tag" data-qtype="multiselect" id="qtypeBtnMulti">☑️ 多選題</button>
+                    <button type="button" class="diagnosis-tag" data-qtype="fill" id="qtypeBtnFill">🔤 文意字彙／填充題</button>
+                    <button type="button" class="diagnosis-tag" data-qtype="translation" id="qtypeBtnTrans">✍️ 翻譯／手寫非選題</button>
+                    <button type="button" class="diagnosis-tag" data-qtype="reading" id="qtypeBtnReading">📖 閱讀測驗／題組</button>
                   </div>
                 </div>
 
                 <!-- Cropped Question Image Preview -->
                 <div id="cropPreviewArea" class="crop-preview-container" style="display:none;">
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.35rem; flex-wrap:wrap; gap:0.35rem;">
-                    <span style="font-size:0.8rem; font-weight:700; color:#4f46e5;">📸 已擷取試卷截圖（支援濾除手寫算式＆自動 OCR 辨識）</span>
+                    <span style="font-size:0.8rem; font-weight:700; color:#4f46e5;">📸 已擷取試卷截圖（支援自動 OCR 題目辨識）</span>
                     <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
-                      <button type="button" class="btn btn-secondary btn-sm" id="btnRerunOcrOnCrop" title="重新辨識截圖中的文字與數學符號">🔍 重新辨識題目</button>
-                      <button type="button" class="btn btn-secondary btn-sm" id="btnOcrLeftPrintOnly" title="若考卷右側有手寫計算或附圖干擾，點此只辨識左半部印刷題幹與選項">✂️ 濾除右側手寫算式重讀</button>
+                      <button type="button" class="btn btn-secondary btn-sm" id="btnRerunOcrOnCrop" title="重新辨識截圖中的題目文字">🔍 重新辨識題目</button>
+                      <button type="button" class="btn btn-secondary btn-sm" id="btnOcrLeftPrintOnly" style="display:none;" title="若考卷右側有手寫計算或附圖干擾，點此只辨識左半部印刷題幹與選項">✂️ 濾除右側手寫算式重讀</button>
                       <button type="button" class="btn btn-danger-outline btn-sm" id="btnRemoveCropImg">移除截圖</button>
                     </div>
                   </div>
                   <img id="cropPreviewImg" src="" alt="題目截圖預覽" />
                   <div id="ocrStatusBar" style="display:none; margin-top:0.45rem; padding:0.45rem 0.7rem; background:#eef2ff; border:1px solid #c7d2fe; border-radius:6px; font-size:0.8rem; color:#312e81; font-weight:600;">
-                    🔍 正在從截圖自動辨識題目文字與數學符號...
+                    🔍 正在從截圖自動辨識題目文字...
                   </div>
                 </div>
 
@@ -281,11 +301,12 @@
 
                 <div class="form-group">
                   <label class="form-label" style="flex-wrap:wrap; gap:0.35rem;">
-                    <span id="labelQuestionStem">題目敘述 / 翻譯原句 / 計算題幹（框選照片或 PDF 會自動辨識帶入）</span>
+                    <span id="labelQuestionStem">題目敘述（在左側試卷框選題目會自動帶入，亦可直接輸入）</span>
                     <button type="button" class="btn btn-secondary btn-sm" id="btnParseRawQuestion" title="自動整理題號與選項">✨ 自動整理題目格式</button>
                   </label>
-                  <!-- Math & Science Quick Symbol Bar -->
-                  <div id="mathSymbolToolbar" style="display:flex; flex-wrap:wrap; gap:0.25rem; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:0.3rem 0.5rem; margin-bottom:0.35rem;">
+
+                  <!-- Math & Science Quick Symbol Bar (Hidden automatically when subject is English / Humanities!) -->
+                  <div id="mathSymbolToolbar" style="display:none; flex-wrap:wrap; gap:0.25rem; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:0.3rem 0.5rem; margin-bottom:0.35rem;">
                     <span style="font-size:0.74rem; color:#64748b; font-weight:600; margin-right:0.2rem;">🧮 符號快捷輸入：</span>
                     <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="lim(x→)" style="padding:0.12rem 0.42rem; font-size:0.78rem;">lim</button>
                     <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="√" style="padding:0.12rem 0.42rem; font-size:0.78rem;">√</button>
@@ -308,8 +329,8 @@
                     <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="⇌" style="padding:0.12rem 0.42rem; font-size:0.78rem;">⇌</button>
                   </div>
 
-                  <!-- 1-Click Math Concept / Topic Quick Selector (Prevents getting stuck when photo has 2D fractions/handwriting!) -->
-                  <div id="mathTopicQuickBar" style="display:flex; flex-wrap:wrap; gap:0.3rem; align-items:center; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:0.35rem 0.55rem; margin-bottom:0.4rem;">
+                  <!-- 1-Click Math Concept / Topic Quick Selector (Only shown when Subject is 數學!) -->
+                  <div id="mathTopicQuickBar" style="display:none; flex-wrap:wrap; gap:0.3rem; align-items:center; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:0.35rem 0.55rem; margin-bottom:0.4rem;">
                     <span style="font-size:0.75rem; color:#1e40af; font-weight:700;">📐 數學考點快選（相片有複雜分式免打字，點選即刻切換引導）：</span>
                     <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="limit" style="padding:0.14rem 0.48rem; font-size:0.75rem;">📈 函數極限／分式／夾擠定理</button>
                     <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="trig" style="padding:0.14rem 0.48rem; font-size:0.75rem;">📐 三角函數／疊合／正餘弦</button>
@@ -319,134 +340,135 @@
                     <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="algebra" style="padding:0.14rem 0.48rem; font-size:0.75rem;">📊 多項式／指對數／數列</button>
                     <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="prob" style="padding:0.14rem 0.48rem; font-size:0.75rem;">🎲 排列組合／機率</button>
                   </div>
-                  <textarea class="form-textarea" id="fieldQuestionText" placeholder="在左側試卷（PDF 或相片 JPG/PNG）框選題目會自動 OCR 辨識帶入；亦可直接輸入或微調題幹..."></textarea>
+                  <textarea class="form-textarea" id="fieldQuestionText" placeholder="在左側試卷框選題目會自動帶入，亦可直接貼上或輸入題目敘述..."></textarea>
                 </div>
 
-                <!-- 🧭 Autonomous Self-Directed Learning Coach (自主學習三階段引導中心) -->
-                <div id="selfLearningCoachPanel" style="background:linear-gradient(135deg,#eef2ff 0%,#f0fdf4 100%); border:2px solid #818cf8; border-radius:12px; padding:0.9rem 1rem; margin-bottom:0.75rem;">
+                <!-- Options A/B/C/D/(E) -->
+                <div class="form-row" id="optionsFourGrid" style="grid-template-columns: 1fr 1fr; margin-bottom:0.75rem;">
+                  <div class="form-group">
+                    <label class="form-label" id="labelOptA">選項 (A)</label>
+                    <input type="text" class="form-input" id="fieldOptA" placeholder="選項 A 內容" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" id="labelOptB">選項 (B)</label>
+                    <input type="text" class="form-input" id="fieldOptB" placeholder="選項 B 內容" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" id="labelOptC">選項 (C)</label>
+                    <input type="text" class="form-input" id="fieldOptC" placeholder="選項 C 內容" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" id="labelOptD">選項 (D)</label>
+                    <input type="text" class="form-input" id="fieldOptD" placeholder="選項 D 內容" />
+                  </div>
+                  <div class="form-group" id="groupOptE" style="grid-column: 1 / -1; display:none;">
+                    <label class="form-label" id="labelOptE">選項 (E) / (5)（五選一或多選題第 5 選項）</label>
+                    <input type="text" class="form-input" id="fieldOptE" placeholder="第 5 個選項內容（四選一可留空）" />
+                  </div>
+                </div>
+
+                <!-- 🧭 Autonomous Self-Directed Learning Coach (自主學習三階段引導中心 - 依科目與試題動態切換) -->
+                <div id="selfLearningCoachPanel" style="background:linear-gradient(135deg,#eef2ff 0%,#f0fdf4 100%); border:2px solid #818cf8; border-radius:12px; padding:0.85rem 0.95rem; margin-bottom:0.25rem;">
                   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.55rem;">
-                    <div>
-                      <span style="font-size:0.92rem; font-weight:800; color:#312e81;">🧭 自主學習三階段引導教練（不直接死背答案，一步步帶你自己想通！）</span>
+                    <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap;">
+                      <span style="font-size:0.9rem; font-weight:800; color:#312e81;">🧭 自主學習三階段引導教練</span>
+                      <span id="slCoachSubjectBadge" style="background:#4f46e5; color:#fff; font-size:0.72rem; font-weight:700; padding:0.12rem 0.55rem; border-radius:999px;">英文科專屬引導</span>
                     </div>
-                    <button type="button" class="btn btn-primary btn-sm" id="btnGenerateSelfLearningGuide" style="font-size:0.76rem; padding:0.25rem 0.65rem;">
+                    <button type="button" class="btn btn-primary btn-sm" id="btnGenerateSelfLearningGuide" style="font-size:0.75rem; padding:0.22rem 0.6rem;">
                       🚀 重新拆解題目與產生提示
                     </button>
                   </div>
 
-                  <!-- Stage 1: Question Deconstruction (讀題鷹架：已知條件 vs 所求目標) -->
-                  <div style="background:#ffffff; border:1px solid #c7d2fe; border-radius:8px; padding:0.6rem 0.8rem; margin-bottom:0.55rem; font-size:0.84rem;">
-                    <div style="font-weight:700; color:#4f46e5; margin-bottom:0.25rem;">【階段 1】🔍 題目條件拆解（先看懂題目給了什麼線索、要算什麼目標）：</div>
+                  <!-- Stage 1: Question Deconstruction -->
+                  <div style="background:#ffffff; border:1px solid #c7d2fe; border-radius:8px; padding:0.55rem 0.75rem; margin-bottom:0.5rem; font-size:0.84rem;">
+                    <div id="slStage1Title" style="font-weight:700; color:#4f46e5; margin-bottom:0.25rem;">【階段 1】🔍 題目語境與線索拆解（整句中譯、前後文關鍵字與核心考點）：</div>
                     <div id="slDeconstructContent" style="color:#1e293b; line-height:1.6;">
-                      請在左側框選試卷題目（支援相片與 PDF）或輸入題目文字，系統將自動為你拆解「📌 已知條件」、「🎯 所求目標」與「🧭 核心考點」！
+                      請在左側框選試卷題目或於上方輸入題幹與選項，系統將自動依照您選的科目為您拆解題目線索與核心考點！
                     </div>
                   </div>
 
-                  <!-- Stage 2: 3-Step Progressive Hint Ladder (不破梗階梯式思考提示) -->
-                  <div style="background:#ffffff; border:1px solid #a7f3d0; border-radius:8px; padding:0.6rem 0.8rem; margin-bottom:0.55rem; font-size:0.84rem;">
-                    <div style="font-weight:700; color:#047857; margin-bottom:0.4rem;">
-                      【階段 2】🪜 階梯式思考提示（卡關時點開一步、自己動筆算一步，不直接破梗！）：
+                  <!-- Stage 2: 3-Step Progressive Hint Ladder -->
+                  <div style="background:#ffffff; border:1px solid #a7f3d0; border-radius:8px; padding:0.55rem 0.75rem; margin-bottom:0.5rem; font-size:0.84rem;">
+                    <div id="slStage2Title" style="font-weight:700; color:#047857; margin-bottom:0.35rem;">
+                      【階段 2】🪜 階梯式思考提示（卡關時點開一步、自己想通一步，不直接破梗！）：
                     </div>
-                    <div style="display:flex; flex-direction:column; gap:0.4rem;">
+                    <div style="display:flex; flex-direction:column; gap:0.38rem;">
                       <div>
                         <button type="button" class="btn btn-secondary btn-sm" id="btnSlHint1" style="width:100%; justify-content:space-between; text-align:left; font-weight:700; color:#1e40af; border-color:#bfdbfe; background:#eff6ff;">
-                          <span>💡 提示 1｜核心觀念與公式喚醒（這題該用哪個定律／公式？）</span>
+                          <span id="labelSlHint1">💡 提示 1｜上下文語境線索與詞性判斷</span>
                           <span id="iconSlHint1">點擊展開 ▼</span>
                         </button>
-                        <div id="boxSlHint1" style="display:none; padding:0.5rem 0.75rem; background:#f8fafc; border-left:3px solid #3b82f6; margin-top:0.25rem; color:#1e293b; line-height:1.6;"></div>
+                        <div id="boxSlHint1" style="display:none; padding:0.5rem 0.75rem; background:#f8fafc; border-left:3px solid #3b82f6; margin-top:0.25rem; color:#1e293b; line-height:1.6; white-space:pre-wrap;"></div>
                       </div>
 
                       <div>
                         <button type="button" class="btn btn-secondary btn-sm" id="btnSlHint2" style="width:100%; justify-content:space-between; text-align:left; font-weight:700; color:#b45309; border-color:#fde68a; background:#fffbeb;">
-                          <span>🔑 提示 2｜關鍵中間步驟檢查（最容易算錯的中間量在哪裡？）</span>
+                          <span id="labelSlHint2">🔑 提示 2｜各選項單字中文意思、詞性與同義詞對照</span>
                           <span id="iconSlHint2">點擊展開 ▼</span>
                         </button>
-                        <div id="boxSlHint2" style="display:none; padding:0.5rem 0.75rem; background:#f8fafc; border-left:3px solid #f59e0b; margin-top:0.25rem; color:#1e293b; line-height:1.6;"></div>
+                        <div id="boxSlHint2" style="display:none; padding:0.5rem 0.75rem; background:#f8fafc; border-left:3px solid #f59e0b; margin-top:0.25rem; color:#1e293b; line-height:1.6; white-space:pre-wrap;"></div>
                       </div>
 
                       <div>
                         <button type="button" class="btn btn-secondary btn-sm" id="btnSlHint3" style="width:100%; justify-content:space-between; text-align:left; font-weight:700; color:#047857; border-color:#a7f3d0; background:#ecfdf5;">
-                          <span>🎯 提示 3｜完整標準推導與解答核對（自己算完後點此對答案）</span>
+                          <span id="labelSlHint3">🎯 提示 3｜完整語意對比與標準解答核對</span>
                           <span id="iconSlHint3">點擊展開 ▼</span>
                         </button>
-                        <div id="boxSlHint3" style="display:none; padding:0.5rem 0.75rem; background:#f8fafc; border-left:3px solid #10b981; margin-top:0.25rem; color:#1e293b; line-height:1.6;"></div>
+                        <div id="boxSlHint3" style="display:none; padding:0.5rem 0.75rem; background:#f8fafc; border-left:3px solid #10b981; margin-top:0.25rem; color:#1e293b; line-height:1.6; white-space:pre-wrap;"></div>
                       </div>
                     </div>
                   </div>
 
-                  <!-- Stage 3: Instant Twin Question Self-Test (舉一反三立即自測) -->
-                  <div style="background:#ffffff; border:1px solid #ddd6fe; border-radius:8px; padding:0.6rem 0.8rem; font-size:0.84rem;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.35rem; margin-bottom:0.3rem;">
-                      <span style="font-weight:700; color:#6d28d9;">【階段 3】⚡ 同觀念「舉一反三」小自測（改個數字／情境，測測看自己真的會了嗎？）：</span>
+                  <!-- Stage 3: Instant Twin Question Self-Test -->
+                  <div style="background:#ffffff; border:1px solid #ddd6fe; border-radius:8px; padding:0.55rem 0.75rem; font-size:0.84rem;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.35rem; margin-bottom:0.28rem;">
+                      <span id="slStage3Title" style="font-weight:700; color:#6d28d9;">【階段 3】⚡ 同單字／同觀念「舉一反三」小自測：</span>
                     </div>
-                    <div id="slTwinQuestionText" style="color:#1e293b; font-weight:600; margin-bottom:0.4rem; line-height:1.55;">
-                      框選或輸入題目後，這裡會自動產生一題同觀念的變式練習題供你立即自測！
+                    <div id="slTwinQuestionText" style="color:#1e293b; font-weight:600; margin-bottom:0.4rem; line-height:1.55; white-space:pre-wrap;">
+                      框選或輸入題目後，這裡會自動產生一題同單字／同觀念的練習題供你立即自測！
                     </div>
                     <div style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;">
-                      <input type="text" class="form-input" id="inputSlTwinAnswer" placeholder="在此輸入你算出的變式題答案..." style="flex:1; min-width:180px; padding:0.35rem 0.6rem; font-size:0.82rem;" />
-                      <button type="button" class="btn btn-primary btn-sm" id="btnCheckSlTwinAnswer" style="font-size:0.78rem;">✅ 核對變式題答案</button>
-                      <button type="button" class="btn btn-secondary btn-sm" id="btnRevealSlTwinSolution" style="font-size:0.78rem;">👀 看變式題詳解</button>
+                      <input type="text" class="form-input" id="inputSlTwinAnswer" placeholder="在此輸入你的自測答案..." style="flex:1; min-width:170px; padding:0.35rem 0.6rem; font-size:0.82rem;" />
+                      <button type="button" class="btn btn-primary btn-sm" id="btnCheckSlTwinAnswer" style="font-size:0.78rem;">✅ 核對答案</button>
+                      <button type="button" class="btn btn-secondary btn-sm" id="btnRevealSlTwinSolution" style="font-size:0.78rem;">👀 看詳解</button>
                     </div>
                     <div id="slTwinFeedbackBox" style="display:none; margin-top:0.4rem; padding:0.45rem 0.65rem; border-radius:6px; font-size:0.82rem; line-height:1.55;"></div>
                   </div>
                 </div>
-
-                <!-- Options A/B/C/D/E or 1/2/3/4/5 (Automatically hidden when Question Type is Translation / Fill!) -->
-                <div class="form-row" id="optionsFourGrid" style="grid-template-columns: 1fr 1fr;">
-                  <div class="form-group">
-                    <label class="form-label" id="labelOptA">選項 (A) / (1)</label>
-                    <input type="text" class="form-input" id="fieldOptA" placeholder="選項 A 或 (1) 內容" />
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label" id="labelOptB">選項 (B) / (2)</label>
-                    <input type="text" class="form-input" id="fieldOptB" placeholder="選項 B 或 (2) 內容" />
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label" id="labelOptC">選項 (C) / (3)</label>
-                    <input type="text" class="form-input" id="fieldOptC" placeholder="選項 C 或 (3) 內容" />
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label" id="labelOptD">選項 (D) / (4)</label>
-                    <input type="text" class="form-input" id="fieldOptD" placeholder="選項 D 或 (4) 內容" />
-                  </div>
-                  <div class="form-group" style="grid-column: 1 / -1;">
-                    <label class="form-label" id="labelOptE">選項 (E) / (5)（五選一或多選題第 5 選項，四選一可留空）</label>
-                    <input type="text" class="form-input" id="fieldOptE" placeholder="選項 E 或 (5) 內容（例如數學多選題第 5 選項）" />
-                  </div>
-                </div>
               </div>
 
-              <!-- Step 2: 選擇錯誤答案 vs 正確答案 (Adapts to Single-Choice, Multi-Select 1~5/A~E, Translation & Calculation!) -->
+              <!-- Step 2: 選擇錯誤答案 vs 正確答案 -->
               <div class="form-section">
                 <div class="section-badge-title" style="flex-wrap:wrap; gap:0.35rem;">
-                  <span id="step2TitleText">STEP 2｜比對「我的誤選／錯誤寫法」與「正確答案」</span>
+                  <span id="step2TitleText">STEP 2｜比對「我的誤選」與「正確答案」</span>
                   <span id="autoAnswerMatchHint" style="font-size:0.78rem; color:#059669; font-weight:600;"></span>
                 </div>
 
                 <div class="choice-selector-row" id="step2ChoiceRow">
                   <!-- Student's Wrong Answer -->
                   <div class="choice-box wrong-box">
-                    <label class="form-label" id="labelWrongAns" style="color:#b91c1c;">❌ 我當初選錯的答案 / 錯誤寫法</label>
+                    <label class="form-label" id="labelWrongAns" style="color:#b91c1c;">❌ 我當初選錯的答案</label>
                     <div class="option-pills" id="wrongOptionPills">
-                      <button type="button" class="option-pill" data-val="A" data-num="1">A / 1</button>
-                      <button type="button" class="option-pill" data-val="B" data-num="2">B / 2</button>
-                      <button type="button" class="option-pill" data-val="C" data-num="3">C / 3</button>
-                      <button type="button" class="option-pill" data-val="D" data-num="4">D / 4</button>
-                      <button type="button" class="option-pill" data-val="E" data-num="5">E / 5</button>
+                      <button type="button" class="option-pill" data-val="A" data-num="1">A</button>
+                      <button type="button" class="option-pill" data-val="B" data-num="2">B</button>
+                      <button type="button" class="option-pill" data-val="C" data-num="3">C</button>
+                      <button type="button" class="option-pill" data-val="D" data-num="4">D</button>
+                      <button type="button" class="option-pill" data-val="E" data-num="5" style="display:none;">E</button>
                     </div>
-                    <input type="text" class="form-input" id="fieldWrongAnswer" placeholder="單選點 1 個；多選可點多個（如 2 或 1,2）；非選直接輸入答案" style="margin-top:0.5rem;" required />
+                    <input type="text" class="form-input" id="fieldWrongAnswer" placeholder="點選上方按鈕或直接輸入錯誤答案" style="margin-top:0.5rem;" required />
                   </div>
 
                   <!-- Correct Answer -->
                   <div class="choice-box correct-box">
-                    <label class="form-label" id="labelCorrectAns" style="color:#15803d;">✅ 試卷正確答案 / 標準解答</label>
+                    <label class="form-label" id="labelCorrectAns" style="color:#15803d;">✅ 試卷正確答案</label>
                     <div class="option-pills" id="correctOptionPills">
-                      <button type="button" class="option-pill" data-val="A" data-num="1">A / 1</button>
-                      <button type="button" class="option-pill" data-val="B" data-num="2">B / 2</button>
-                      <button type="button" class="option-pill" data-val="C" data-num="3">C / 3</button>
-                      <button type="button" class="option-pill" data-val="D" data-num="4">D / 4</button>
-                      <button type="button" class="option-pill" data-val="E" data-num="5">E / 5</button>
+                      <button type="button" class="option-pill" data-val="A" data-num="1">A</button>
+                      <button type="button" class="option-pill" data-val="B" data-num="2">B</button>
+                      <button type="button" class="option-pill" data-val="C" data-num="3">C</button>
+                      <button type="button" class="option-pill" data-val="D" data-num="4">D</button>
+                      <button type="button" class="option-pill" data-val="E" data-num="5" style="display:none;">E</button>
                     </div>
-                    <input type="text" class="form-input" id="fieldCorrectAnswer" placeholder="單選點 1 個；多選可點多個（如 2, 5 或 B, E）；非選輸入標準答案" style="margin-top:0.5rem;" required />
+                    <input type="text" class="form-input" id="fieldCorrectAnswer" placeholder="點選上方按鈕或直接輸入正確答案" style="margin-top:0.5rem;" required />
                   </div>
                 </div>
 
@@ -463,7 +485,7 @@
                   <span>STEP 3｜🤖 系統自動診斷：告訴你「哪裡判斷錯誤」＆「這題怎麼寫才正確」</span>
                   <div style="display:flex; gap:0.4rem;">
                     <button type="button" class="btn btn-primary btn-sm" id="btnAutoAnalyzeMistake">
-                      🪄 根據題目與截圖自動分析錯因
+                      🪄 重新自動分析錯因
                     </button>
                     <button type="button" class="btn btn-secondary btn-sm" id="btnToggleManualEdit">
                       ✏️ 微調解析文字
@@ -471,15 +493,15 @@
                   </div>
                 </div>
 
-                <!-- Optional Error Tags (Auto-selected by system, clickable by student) -->
+                <!-- Optional Error Tags (Filtered dynamically by Subject so English doesn't show Math tags!) -->
                 <div class="form-group" style="margin-bottom:0.65rem;">
-                  <label class="form-label" style="font-size:0.8rem; color:#475569;">系統判定錯誤類型（點選可切換，會自動更新下方診斷說明）：</label>
+                  <label class="form-label" style="font-size:0.8rem; color:#475569;">系統判定錯誤類型（點選可切換）：</label>
                   <div class="error-tags-grid" id="errorTagsContainer" style="margin-bottom:0.2rem;">
-                    <button type="button" class="diagnosis-tag" data-tag="文法與詞性判斷">🔤 文法／詞性／關代判斷錯誤</button>
-                    <button type="button" class="diagnosis-tag" data-tag="片語與字彙搭配">📘 片語／單字語意搭配混淆</button>
-                    <button type="button" class="diagnosis-tag" data-tag="審題失誤">🔍 審題失誤（前後文線索漏看）</button>
-                    <button type="button" class="diagnosis-tag" data-tag="觀念混淆">🧠 觀念混淆（相似定義／公式搞混）</button>
-                    <button type="button" class="diagnosis-tag" data-tag="計算粗心">🔢 計算／正負號粗心</button>
+                    <button type="button" class="diagnosis-tag" data-tag="文法與詞性判斷" id="errTagGrammar">🔤 文法／詞性／關代判斷錯誤</button>
+                    <button type="button" class="diagnosis-tag" data-tag="片語與字彙搭配" id="errTagVocab">📘 片語／單字語意搭配混淆</button>
+                    <button type="button" class="diagnosis-tag" data-tag="審題失誤" id="errTagReading">🔍 審題失誤（前後文線索漏看）</button>
+                    <button type="button" class="diagnosis-tag" data-tag="觀念混淆" id="errTagConcept">🧠 觀念混淆（相似定義搞混）</button>
+                    <button type="button" class="diagnosis-tag" data-tag="計算粗心" id="errTagCalc" style="display:none;">🔢 計算／正負號粗心</button>
                   </div>
                 </div>
 
@@ -561,6 +583,7 @@
         </div>
 
       </div>
+      <div class="daphne-tab-signature">✨ Made by Daphne Lin｜錯題進化論 Mistake Mastery</div>
     </section>
 
     <!-- ==========================================
@@ -601,6 +624,7 @@
       </div>
 
       <div class="mistakes-grid" id="mistakesCardsContainer"></div>
+      <div class="daphne-tab-signature">✨ Made by Daphne Lin｜錯題進化論 Mistake Mastery</div>
     </section>
 
     <!-- ==========================================
@@ -673,7 +697,7 @@
           <div class="panel-header" style="background:#1e293b; color:#ffffff;">
             <div style="display:flex; align-items:center; gap:0.75rem;">
               <span id="quizProgressBadge" style="background:#4f46e5; padding:0.25rem 0.7rem; border-radius:999px; font-size:0.85rem; font-weight:700;">第 1 / 5 題</span>
-              <span id="quizSubjectTitle" style="font-weight:700;">自然科學｜第一次段考</span>
+              <span id="quizSubjectTitle" style="font-weight:700;">英文｜第一次段考</span>
             </div>
             <button class="btn btn-ghost-light btn-sm" id="btnQuitQuiz">結束練習</button>
           </div>
@@ -709,7 +733,7 @@
                 </button>
               </div>
               <div id="quizSkeletonHintText" style="display:none; font-size:0.86rem; color:#4f46e5; background:#eef2ff; padding:0.45rem 0.75rem; border-radius:6px; margin-bottom:0.55rem; font-family:monospace; font-weight:700;"></div>
-              <textarea class="form-textarea" id="quizUserTypedAnswer" placeholder="請在此輸入完整翻譯句子、英文單字或物理/化學/數學計算答案..." style="font-size:1rem; min-height:74px;"></textarea>
+              <textarea class="form-textarea" id="quizUserTypedAnswer" placeholder="請在此輸入完整答案..." style="font-size:1rem; min-height:74px;"></textarea>
             </div>
 
             <!-- Step 2: Concept Double-Check (Shown if chkConceptVerify is enabled) -->
@@ -755,6 +779,7 @@
         </div>
 
       </div>
+      <div class="daphne-tab-signature">✨ Made by Daphne Lin｜錯題進化論 Mistake Mastery</div>
     </section>
 
     <!-- ==========================================
@@ -836,9 +861,18 @@
           </div>
         </div>
       </div>
+      <div class="daphne-tab-signature">✨ Made by Daphne Lin｜錯題進化論 Mistake Mastery</div>
     </section>
 
   </main>
+
+  <!-- Global Persistent Footer (Appears on all tabs) -->
+  <footer class="app-footer">
+    <div class="app-footer-inner">
+      <span>📘 錯題進化論 Mistake Mastery — 互動式學生自主學習與錯題診斷系統</span>
+      <span class="footer-daphne-badge">✨ Made by Daphne Lin</span>
+    </div>
+  </footer>
 
   <!-- ==========================================
        MODAL: 詢問是否有已使用的試算表要繼續使用，還是開啟新的試算表
@@ -846,7 +880,10 @@
   <div class="modal-backdrop" id="sheetInitModal">
     <div class="modal-card">
       <div class="modal-header">
-        <div style="font-size:0.85rem; opacity:0.9; font-weight:600; margin-bottom:0.25rem;">WELCOME TO MISTAKE MASTERY</div>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.25rem;">
+          <span style="font-size:0.85rem; opacity:0.9; font-weight:600;">WELCOME TO MISTAKE MASTERY</span>
+          <span style="background:rgba(255,255,255,0.2); padding:0.18rem 0.65rem; border-radius:999px; font-size:0.78rem; font-weight:700;">✨ Made by Daphne Lin</span>
+        </div>
         <h2 style="font-size:1.35rem; font-weight:700;">📊 請問您是否有已經使用的試算表要繼續使用，還是要開啟新的試算表？</h2>
       </div>
 
