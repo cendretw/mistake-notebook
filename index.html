@@ -287,9 +287,13 @@
                   <!-- Math & Science Quick Symbol Bar -->
                   <div id="mathSymbolToolbar" style="display:flex; flex-wrap:wrap; gap:0.25rem; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:0.3rem 0.5rem; margin-bottom:0.35rem;">
                     <span style="font-size:0.74rem; color:#64748b; font-weight:600; margin-right:0.2rem;">🧮 符號快捷輸入：</span>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="lim(x→)" style="padding:0.12rem 0.42rem; font-size:0.78rem;">lim</button>
                     <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="√" style="padding:0.12rem 0.42rem; font-size:0.78rem;">√</button>
                     <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="²" style="padding:0.12rem 0.42rem; font-size:0.78rem;">x²</button>
                     <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="³" style="padding:0.12rem 0.42rem; font-size:0.78rem;">x³</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="|x|" style="padding:0.12rem 0.42rem; font-size:0.78rem;">|x|</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="[x]" style="padding:0.12rem 0.42rem; font-size:0.78rem;">[高斯]</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="∞" style="padding:0.12rem 0.42rem; font-size:0.78rem;">∞</button>
                     <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="α" style="padding:0.12rem 0.42rem; font-size:0.78rem;">α</button>
                     <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="β" style="padding:0.12rem 0.42rem; font-size:0.78rem;">β</button>
                     <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="θ" style="padding:0.12rem 0.42rem; font-size:0.78rem;">θ</button>
@@ -302,6 +306,18 @@
                     <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="/" style="padding:0.12rem 0.42rem; font-size:0.78rem;">a/b</button>
                     <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="→" style="padding:0.12rem 0.42rem; font-size:0.78rem;">→</button>
                     <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="⇌" style="padding:0.12rem 0.42rem; font-size:0.78rem;">⇌</button>
+                  </div>
+
+                  <!-- 1-Click Math Concept / Topic Quick Selector (Prevents getting stuck when photo has 2D fractions/handwriting!) -->
+                  <div id="mathTopicQuickBar" style="display:flex; flex-wrap:wrap; gap:0.3rem; align-items:center; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:0.35rem 0.55rem; margin-bottom:0.4rem;">
+                    <span style="font-size:0.75rem; color:#1e40af; font-weight:700;">📐 數學考點快選（相片有複雜分式免打字，點選即刻切換引導）：</span>
+                    <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="limit" style="padding:0.14rem 0.48rem; font-size:0.75rem;">📈 函數極限／分式／夾擠定理</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="trig" style="padding:0.14rem 0.48rem; font-size:0.75rem;">📐 三角函數／疊合／正餘弦</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="complex" style="padding:0.14rem 0.48rem; font-size:0.75rem;">🧭 複數平面／極式</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="vector" style="padding:0.14rem 0.48rem; font-size:0.75rem;">↗️ 平面與空間向量／內積</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="calculus" style="padding:0.14rem 0.48rem; font-size:0.75rem;">📉 微積分／導數切線／面積</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="algebra" style="padding:0.14rem 0.48rem; font-size:0.75rem;">📊 多項式／指對數／數列</button>
+                    <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="prob" style="padding:0.14rem 0.48rem; font-size:0.75rem;">🎲 排列組合／機率</button>
                   </div>
                   <textarea class="form-textarea" id="fieldQuestionText" placeholder="在左側試卷（PDF 或相片 JPG/PNG）框選題目會自動 OCR 辨識帶入；亦可直接輸入或微調題幹..."></textarea>
                 </div>
