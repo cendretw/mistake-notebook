@@ -347,19 +347,20 @@ function initSpreadsheetModal() {
     });
   }
 
-  // Choice 2C: Start New Spreadsheet in App First
+  // Choice 2: Start Brand New Spreadsheet (Do NOT open a blank Excel/Google Sheet upfront!)
   btnConfirmNew.addEventListener('click', () => {
     const nameInput = document.getElementById('inputNewSheetName').value.trim();
     state.sheetName = nameInput || '我的錯題進化本_2026';
     state.sheetMode = 'new';
     state.originalLoadedCount = 0;
     state.excelFileHandle = null;
+    state.linkedGoogleSheetUrl = '';
     state.mistakes = [];
     saveToLocalStorage();
     updateAllViews();
     modal.classList.add('hidden');
-    switchTab('tab-sheet');
-    showToast(`✨ 已在系統內建立新試算表：「${state.sheetName}」（已為您切換至試算表預覽頁）`);
+    switchTab('tab-record');
+    showToast(`✨ 已設定新試算表「${state.sheetName}」！請先整理錯題，完成後即可一鍵匯出成完整的 Excel 或 Google 試算表。`);
   });
 
   // Quick Export Button in Header
@@ -628,6 +629,7 @@ function initPdfViewerAndCrop() {
   const btnZoomIn = document.getElementById('btnZoomIn');
   const btnZoomOut = document.getElementById('btnZoomOut');
   const btnToggleCrop = document.getElementById('btnToggleCropMode');
+  const btnCropPassage = document.getElementById('btnCropPassageMode');
   const btnSample1 = document.getElementById('btnGenerateSamplePdf');
   const btnSample2 = document.getElementById('btnEmptyStateSamplePdf');
 
@@ -671,8 +673,16 @@ function initPdfViewerAndCrop() {
   });
 
   btnToggleCrop.addEventListener('click', () => {
-    setCropMode(!state.cropMode);
+    state.cropTarget = 'question';
+    setCropMode(!state.cropMode, 'question');
   });
+
+  if (btnCropPassage) {
+    btnCropPassage.addEventListener('click', () => {
+      state.cropTarget = 'passage';
+      setCropMode(true, 'passage');
+    });
+  }
 
   btnSample1.addEventListener('click', () => generateInteractiveSampleExam());
   btnSample2.addEventListener('click', () => generateInteractiveSampleExam());
@@ -680,18 +690,26 @@ function initPdfViewerAndCrop() {
   initCropCanvasMouseEvents();
 }
 
-function setCropMode(enabled) {
+function setCropMode(enabled, modeType = 'question') {
   state.cropMode = enabled;
+  state.cropTarget = modeType;
   const btn = document.getElementById('btnToggleCropMode');
   const overlay = document.getElementById('cropOverlayCanvas');
   const banner = document.getElementById('cropHintBanner');
 
-  btn.classList.toggle('active', enabled);
-  btn.textContent = enabled
-    ? '🛑 結束框選模式（請直接在下方試卷拖曳框選）'
-    : '✂️ 框選題目截圖＋擷取文字';
+  btn.classList.toggle('active', enabled && modeType === 'question');
+  btn.textContent =
+    enabled && modeType === 'question'
+      ? '🛑 結束框選（請在下方試卷拖曳框選該題）'
+      : '✂️ 框選題目與選項';
   overlay.classList.toggle('active', enabled);
-  banner.style.display = enabled ? 'block' : 'none';
+  if (banner) {
+    banner.style.display = enabled ? 'block' : 'none';
+    banner.textContent =
+      modeType === 'passage'
+        ? '📖 【加框克漏字文章模式】請在下方試卷拖曳框選「克漏字文章段落（例如含 __19__ 的那段文字）」，系統會自動將文章截圖拼接到選項上方並帶入上下文！'
+        : '💡 請在下方試卷上「拖曳框選你要的那一題（例如第 19 題）」，系統會精準抓取該題選項並過濾上下題干擾！';
+  }
 }
 
 function switchDocSlot(slot) {
@@ -1015,7 +1033,7 @@ function initCropCanvasMouseEvents() {
     const rw = Math.min(overlay.width - rx, Math.abs(pos.x - state.cropStartX));
     const rh = Math.min(overlay.height - ry, Math.abs(pos.y - state.cropStartY));
 
-    if (rw < 24 || rh < 24) return; // Ignore tiny accidental clicks
+    if (rw < 18 || rh < 14) return; // Ignore tiny accidental clicks
 
     // 1. Capture cropped image from #pdfCanvas
     const tempCanvas = document.createElement('canvas');
@@ -1024,12 +1042,48 @@ function initCropCanvasMouseEvents() {
     const tCtx = tempCanvas.getContext('2d');
     tCtx.drawImage(pdfCanvas, rx, ry, rw, rh, 0, 0, rw, rh);
     const croppedDataUrl = tempCanvas.toDataURL('image/png');
-    setCroppedImagePreview(croppedDataUrl);
 
-    // 2. Extract underlying text from PDF or Sample Exam within that region
-    await extractTextFromCropRegion(rx, ry, rw, rh);
-    setCropMode(false);
+    if (state.cropTarget === 'passage' && state.currentCropDataUrl) {
+      // Stitch Cloze passage image ABOVE existing question options image
+      const mergedDataUrl = await stitchTwoImagesVertically(
+        croppedDataUrl,
+        state.currentCropDataUrl
+      );
+      setCroppedImagePreview(mergedDataUrl);
+      await extractTextFromCropRegion(rx, ry, rw, rh, 'passage');
+    } else {
+      setCroppedImagePreview(croppedDataUrl);
+      await extractTextFromCropRegion(rx, ry, rw, rh, state.cropTarget || 'question');
+    }
+    setCropMode(false, 'question');
   });
+}
+
+async function stitchTwoImagesVertically(topDataUrl, bottomDataUrl) {
+  const loadImg = (src) =>
+    new Promise((res) => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.src = src;
+    });
+  const [topImg, botImg] = await Promise.all([
+    loadImg(topDataUrl),
+    loadImg(bottomDataUrl)
+  ]);
+  const c = document.createElement('canvas');
+  c.width = Math.max(topImg.width, botImg.width);
+  c.height = topImg.height + botImg.height + 10;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(topImg, 0, 0);
+  ctx.strokeStyle = '#cbd5e1';
+  ctx.beginPath();
+  ctx.moveTo(0, topImg.height + 5);
+  ctx.lineTo(c.width, topImg.height + 5);
+  ctx.stroke();
+  ctx.drawImage(botImg, 0, topImg.height + 10);
+  return c.toDataURL('image/png');
 }
 
 function setCroppedImagePreview(dataUrl) {
@@ -1045,7 +1099,7 @@ function setCroppedImagePreview(dataUrl) {
   }
 }
 
-async function extractTextFromCropRegion(rx, ry, rw, rh) {
+async function extractTextFromCropRegion(rx, ry, rw, rh, modeType = 'question') {
   const docState = state.docs[state.activeDocSlot];
 
   if (docState.type === 'sample') {
@@ -1063,6 +1117,7 @@ async function extractTextFromCropRegion(rx, ry, rw, rh) {
       document.getElementById('fieldOptC').value = matched.optC;
       document.getElementById('fieldOptD').value = matched.optD;
       autoFillAnswerFromKeyMap(matched.qNum);
+      runAutoMistakeDiagnosis();
       showToast(
         `✂️ 已自動擷取第 ${matched.qNum} 題截圖、題幹與 (A)~(D) 選項！`
       );
@@ -1076,31 +1131,55 @@ async function extractTextFromCropRegion(rx, ry, rw, rh) {
       const viewport = page.getViewport({ scale: docState.scale });
       const textContent = await page.getTextContent();
 
-      const linesInBox = [];
+      // Auto-infer subject from PDF filename if obvious
+      if (docState.fileName) {
+        if (/英文|English/i.test(docState.fileName)) {
+          document.getElementById('fieldSubject').value = '英文';
+        } else if (/數學|Math/i.test(docState.fileName)) {
+          document.getElementById('fieldSubject').value = '數學';
+        } else if (/自然|物理|化學|生物/i.test(docState.fileName)) {
+          document.getElementById('fieldSubject').value = '自然科學';
+        }
+        document.getElementById('fieldUnit').value = docState.fileName.replace(/\.pdf$/i, '');
+      }
+
+      // Strict center-based bounding box filter so adjacent lines (like Q18 above or Q20 below) never leak in!
+      const itemsInBox = [];
       for (const item of textContent.items) {
         if (!item.str || !item.str.trim()) continue;
         const tx = window.pdfjsLib.Util.transform(
           viewport.transform,
           item.transform
         );
-        const x = tx[4];
-        const y = tx[5];
+        const fontH = Math.hypot(tx[2], tx[3]) || 12;
+        const itemW = (item.width || 8) * docState.scale;
+        // tx[4] is left X, tx[5] is baseline Y (character body sits above baseline)
+        const centerX = tx[4] + Math.min(itemW * 0.25, 12);
+        const centerY = tx[5] - fontH * 0.35;
+
         if (
-          x >= rx - 25 &&
-          x <= rx + rw + 25 &&
-          y >= ry - 15 &&
-          y <= ry + rh + 25
+          centerX >= rx - 3 &&
+          centerX <= rx + rw + 3 &&
+          centerY >= ry - 2 &&
+          centerY <= ry + rh + 2
         ) {
-          linesInBox.push({ x, y, str: item.str });
+          itemsInBox.push({ x: tx[4], y: centerY, str: item.str.trim() });
         }
       }
 
-      linesInBox.sort((a, b) => (Math.abs(a.y - b.y) < 8 ? a.x - b.x : a.y - b.y));
-      const joinedText = linesInBox.map((l) => l.str).join(' ');
-      if (joinedText.trim()) {
-        document.getElementById('fieldQuestionText').value = joinedText.trim();
-        parseQuestionAndOptionsFromRawText(joinedText.trim());
-        showToast('✂️ 已擷取框選範圍題目截圖並自動拆解 PDF 文字！');
+      // Group into horizontal lines (tolerance 6px) and sort left-to-right within each line
+      itemsInBox.sort((a, b) => (Math.abs(a.y - b.y) < 6 ? a.x - b.x : a.y - b.y));
+      const joinedText = itemsInBox.map((l) => l.str).join(' ').replace(/\s+/g, ' ').trim();
+
+      if (joinedText) {
+        if (modeType === 'passage') {
+          document.getElementById('fieldQuestionText').value = joinedText;
+          runAutoMistakeDiagnosis();
+          showToast('📖 已附加克漏字文章截圖並帶入上下文敘述！');
+          return;
+        }
+        parseQuestionAndOptionsFromRawText(joinedText);
+        runAutoMistakeDiagnosis();
         return;
       }
     } catch (err) {
@@ -1108,36 +1187,140 @@ async function extractTextFromCropRegion(rx, ry, rw, rh) {
     }
   }
 
-  showToast('📸 已擷取題目畫面截圖！可於右側補充文字或選擇答案。');
+  runAutoMistakeDiagnosis();
+  showToast('📸 已擷取題目畫面截圖！請點選 STEP 2 的誤選與正解，系統將自動為您分析！');
 }
 
+// Smart Parser that handles Cloze Option Rows, Multi-Question Crops, and Standard Questions without jumbling!
 function parseQuestionAndOptionsFromRawText(rawText) {
-  if (!rawText) return;
+  const multiBar = document.getElementById('multiQuestionSelectorBar');
+  const multiBtns = document.getElementById('multiQuestionButtons');
+  if (multiBar) multiBar.style.display = 'none';
 
-  // Detect leading question number like "12." or "12、" or "(12)"
-  const qNumMatch = rawText.match(/^\s*[\(（\[]?(\d{1,3})[\)）\]\.、．\s]/);
-  if (qNumMatch) {
-    const qNum = qNumMatch[1];
-    document.getElementById('fieldQuestionNum').value = qNum;
-    autoFillAnswerFromKeyMap(qNum);
-  }
+  if (!rawText || !rawText.trim()) return;
+  const cleaned = rawText.replace(/\s+/g, ' ').trim();
 
-  // Detect (A) ... (B) ... (C) ... (D) ...
-  const optRegex =
-    /[\(（\[]?A[\)）\]\.、\s]\s*(.+?)\s*[\(（\[]?B[\)）\]\.、\s]\s*(.+?)\s*[\(（\[]?C[\)）\]\.、\s]\s*(.+?)\s*[\(（\[]?D[\)）\]\.、\s]\s*(.+)$/is;
-  const match = rawText.match(optRegex);
-  if (match) {
-    const stemEndIdx = rawText.search(/[\(（\[]?A[\)）\]\.、\s]/);
-    if (stemEndIdx > 0) {
-      document.getElementById('fieldQuestionText').value = rawText
-        .slice(0, stemEndIdx)
-        .trim();
+  // 1. Check if the cropped region contains one or more numbered option rows like:
+  // "( ) 19. (A) that (B) who (C) whom (D) which ( ) 20. (A) used for..."
+  // Notice we also strip any orphan tail words before the first question number (e.g. "madden ( ) 19...")
+  const multiQRegex =
+    /(?:[\(（\[]\s*[\)）\]]\s*)?(\d{1,3})\s*[\.、．\)]\s*([^]*?[\(（\[][A-Da-d][\)）\]\.、\s][^]*?)(?=(?:[\(（\[]\s*[\)）\]]\s*)?\d{1,3}\s*[\.、．\)]\s*[^]*?[\(（\[][A-Da-d][\)）\]\.、\s]|$)/g;
+
+  const detectedQuestions = [];
+  let m;
+  while ((m = multiQRegex.exec(cleaned)) !== null) {
+    const qNum = m[1];
+    const body = m[2].trim();
+    const parsedOpts = splitStemAndFourOptions(body);
+    if (parsedOpts) {
+      detectedQuestions.push({
+        qNum,
+        stem: parsedOpts.stem,
+        optA: parsedOpts.optA,
+        optB: parsedOpts.optB,
+        optC: parsedOpts.optC,
+        optD: parsedOpts.optD
+      });
     }
-    document.getElementById('fieldOptA').value = match[1].trim();
-    document.getElementById('fieldOptB').value = match[2].trim();
-    document.getElementById('fieldOptC').value = match[3].trim();
-    document.getElementById('fieldOptD').value = match[4].trim();
   }
+
+  if (detectedQuestions.length > 0) {
+    applyParsedQuestionObject(detectedQuestions[0]);
+
+    if (detectedQuestions.length > 1 && multiBar && multiBtns) {
+      multiBar.style.display = 'block';
+      multiBtns.innerHTML = detectedQuestions
+        .map(
+          (q, idx) =>
+            `<button type="button" class="btn btn-sm ${
+              idx === 0 ? 'btn-primary' : 'btn-secondary'
+            } multi-q-pick-btn" data-qidx="${idx}">
+              第 ${escapeHtml(q.qNum)} 題： (A) ${escapeHtml(q.optA.slice(0, 12))}...
+            </button>`
+        )
+        .join('');
+
+      multiBtns.querySelectorAll('.multi-q-pick-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const idx = Number(btn.getAttribute('data-qidx'));
+          multiBtns.querySelectorAll('.multi-q-pick-btn').forEach((b) => {
+            b.classList.remove('btn-primary');
+            b.classList.add('btn-secondary');
+          });
+          btn.classList.remove('btn-secondary');
+          btn.classList.add('btn-primary');
+          applyParsedQuestionObject(detectedQuestions[idx]);
+          runAutoMistakeDiagnosis();
+        });
+      });
+
+      showToast(
+        `✂️ 框選範圍內偵測到 ${detectedQuestions.length} 題（第 ${detectedQuestions
+          .map((d) => d.qNum)
+          .join('、')} 題），已自動幫您拆開！可點擊按鈕切換題號。`
+      );
+    } else {
+      showToast(
+        `✂️ 已精準擷取第 ${detectedQuestions[0].qNum} 題的 (A)(B)(C)(D) 選項！`
+      );
+    }
+    return;
+  }
+
+  // 2. Fallback: Single question without a leading number or with options only
+  const singleParsed = splitStemAndFourOptions(cleaned);
+  if (singleParsed) {
+    if (singleParsed.stem) {
+      document.getElementById('fieldQuestionText').value = singleParsed.stem;
+    }
+    document.getElementById('fieldOptA').value = singleParsed.optA;
+    document.getElementById('fieldOptB').value = singleParsed.optB;
+    document.getElementById('fieldOptC').value = singleParsed.optC;
+    document.getElementById('fieldOptD').value = singleParsed.optD;
+    showToast('✂️ 已自動拆解 (A)(B)(C)(D) 四個選項！');
+  } else {
+    document.getElementById('fieldQuestionText').value = cleaned;
+  }
+}
+
+function splitStemAndFourOptions(text) {
+  // Match (A) ... (B) ... (C) ... (D) ...
+  const optRegex =
+    /^(.*?)\s*[\(（\[]\s*A\s*[\)）\]]\s*(.+?)\s*[\(（\[]\s*B\s*[\)）\]]\s*(.+?)\s*[\(（\[]\s*C\s*[\)）\]]\s*(.+?)\s*[\(（\[]\s*D\s*[\)）\]]\s*(.+)$/is;
+  const match = text.match(optRegex);
+  if (!match) return null;
+
+  const cleanOpt = (s) =>
+    s
+      .replace(/[\(（\[]\s*[\)）\]]\s*\d{1,3}\s*[\.、．].*$/, '') // strip any accidental trailing "( ) 20."
+      .trim();
+
+  return {
+    stem: match[1].replace(/^[\(（\[]\s*[\)）\]]\s*/, '').trim(),
+    optA: cleanOpt(match[2]),
+    optB: cleanOpt(match[3]),
+    optC: cleanOpt(match[4]),
+    optD: cleanOpt(match[5])
+  };
+}
+
+function applyParsedQuestionObject(qObj) {
+  document.getElementById('fieldQuestionNum').value = qObj.qNum;
+  autoFillAnswerFromKeyMap(qObj.qNum);
+
+  const currentStem = document.getElementById('fieldQuestionText').value.trim();
+  if (qObj.stem && qObj.stem.length > 6) {
+    document.getElementById('fieldQuestionText').value = `${qObj.qNum}. ${qObj.stem}`;
+  } else if (!currentStem || /^\(?\)?\s*\d+\.?$/.test(currentStem) || currentStem.includes('(A)')) {
+    document.getElementById(
+      'fieldQuestionText'
+    ).value = `第 ${qObj.qNum} 題（請參照試卷截圖上下文選出正確選項）`;
+  }
+
+  document.getElementById('fieldOptA').value = qObj.optA;
+  document.getElementById('fieldOptB').value = qObj.optB;
+  document.getElementById('fieldOptC').value = qObj.optC;
+  document.getElementById('fieldOptD').value = qObj.optD;
 }
 
 // ============================================================================
@@ -1161,6 +1344,7 @@ function initAnswerKeyDrawer() {
 
     const currentQNum = document.getElementById('fieldQuestionNum').value.trim();
     if (currentQNum) autoFillAnswerFromKeyMap(currentQNum);
+    runAutoMistakeDiagnosis();
     showToast(`🔑 已更新標準答案表（共 ${Object.keys(state.answerKeyMap).length} 題）！`);
   });
 }
@@ -1168,7 +1352,6 @@ function initAnswerKeyDrawer() {
 function parseBulkAnswerString(raw) {
   const map = {};
   if (raw.includes(':') || raw.includes('：') || raw.includes('=')) {
-    // Format: 1:A, 2:C, 3:D
     const pairs = raw.split(/[,，;；\s]+/);
     pairs.forEach((p) => {
       const m = p.match(/^(\d+)[:：=]([A-Za-z0-9]+)$/);
@@ -1177,7 +1360,6 @@ function parseBulkAnswerString(raw) {
       }
     });
   } else {
-    // Format: ACDBB...
     const letters = raw.replace(/[^A-Za-z]/g, '').toUpperCase().split('');
     letters.forEach((ch, idx) => {
       map[String(idx + 1)] = ch;
@@ -1215,7 +1397,7 @@ function autoFillAnswerFromKeyMap(qNum) {
 }
 
 // ============================================================================
-// STEP 1C: Interactive Mistake Diagnosis Form
+// STEP 1C: Automatic Mistake Diagnosis Engine (Zero Typing Needed for Students!)
 // ============================================================================
 function initMistakeForm() {
   // Remove cropped image button
@@ -1227,37 +1409,44 @@ function initMistakeForm() {
   document.getElementById('btnParseRawQuestion').addEventListener('click', () => {
     const raw = document.getElementById('fieldQuestionText').value;
     parseQuestionAndOptionsFromRawText(raw);
-    showToast('✨ 已嘗試拆分題幹與 (A)(B)(C)(D) 選項！');
+    runAutoMistakeDiagnosis();
+    showToast('✨ 已整理題號與 (A)(B)(C)(D) 選項並更新自動診斷！');
   });
 
   // Auto-lookup standard answer when typing question number
   document.getElementById('fieldQuestionNum').addEventListener('input', (e) => {
     autoFillAnswerFromKeyMap(e.target.value);
+    runAutoMistakeDiagnosis();
   });
 
-  // Wrong & Correct Option Pills
+  ['fieldQuestionText', 'fieldOptA', 'fieldOptB', 'fieldOptC', 'fieldOptD', 'fieldSubject'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', () => runAutoMistakeDiagnosis());
+  });
+
+  // Wrong & Correct Option Pills -> Immediately trigger automatic diagnosis!
   document.querySelectorAll('#wrongOptionPills .option-pill').forEach((btn) => {
     btn.addEventListener('click', () => {
       setOptionPillAndInput('wrong', btn.getAttribute('data-val'));
-      updateGuidedPromptUI();
+      runAutoMistakeDiagnosis();
     });
   });
 
   document.querySelectorAll('#correctOptionPills .option-pill').forEach((btn) => {
     btn.addEventListener('click', () => {
       setOptionPillAndInput('correct', btn.getAttribute('data-val'));
-      updateGuidedPromptUI();
+      runAutoMistakeDiagnosis();
     });
   });
 
   document.getElementById('fieldWrongAnswer').addEventListener('input', (e) => {
     setOptionPillAndInput('wrong', e.target.value.trim().toUpperCase(), false);
-    updateGuidedPromptUI();
+    runAutoMistakeDiagnosis();
   });
 
   document.getElementById('fieldCorrectAnswer').addEventListener('input', (e) => {
     setOptionPillAndInput('correct', e.target.value.trim().toUpperCase(), false);
-    updateGuidedPromptUI();
+    runAutoMistakeDiagnosis();
   });
 
   // Error Diagnosis Tags
@@ -1271,9 +1460,66 @@ function initMistakeForm() {
         state.selectedErrorTags.add(tag);
         tagBtn.classList.add('selected');
       }
-      updateGuidedPromptUI();
+      runAutoMistakeDiagnosis();
     });
   });
+
+  // Toggle Manual Edit Section
+  const btnToggleManual = document.getElementById('btnToggleManualEdit');
+  if (btnToggleManual) {
+    btnToggleManual.addEventListener('click', () => {
+      const sec = document.getElementById('manualEditSection');
+      sec.style.display = sec.style.display === 'none' ? 'block' : 'none';
+    });
+  }
+
+  // Sync manual edits back to preview card live
+  ['fieldWhyWrong', 'fieldCorrectConcept', 'fieldKeyTakeaway'].forEach((fieldId) => {
+    const el = document.getElementById(fieldId);
+    if (!el) return;
+    el.addEventListener('input', () => {
+      document.getElementById('previewWhyWrong').textContent =
+        document.getElementById('fieldWhyWrong').value;
+      document.getElementById('previewCorrectConcept').textContent =
+        document.getElementById('fieldCorrectConcept').value;
+      document.getElementById('previewKeyTakeaway').textContent =
+        document.getElementById('fieldKeyTakeaway').value;
+    });
+  });
+
+  // Auto-Analyze Button (runs built-in smart analyzer + Gemini Vision if API Key set)
+  const btnAutoAnalyze = document.getElementById('btnAutoAnalyzeMistake');
+  if (btnAutoAnalyze) {
+    btnAutoAnalyze.addEventListener('click', async () => {
+      runAutoMistakeDiagnosis(true);
+      const savedKey = localStorage.getItem('mistake_gemini_api_key') || '';
+      if (savedKey) {
+        await runGeminiVisionDiagnosis(savedKey);
+      } else {
+        showToast('🤖 已根據您的選項與題目自動完成錯因診斷與正確寫法解析！');
+      }
+    });
+  }
+
+  // Optional Gemini API Key Drawer
+  const btnToggleAiKey = document.getElementById('btnToggleAiKeyBox');
+  if (btnToggleAiKey) {
+    const savedKey = localStorage.getItem('mistake_gemini_api_key') || '';
+    const keyInput = document.getElementById('inputGeminiApiKey');
+    if (keyInput && savedKey) keyInput.value = savedKey;
+
+    btnToggleAiKey.addEventListener('click', () => {
+      const drawer = document.getElementById('aiKeyDrawer');
+      drawer.style.display = drawer.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.getElementById('btnSaveGeminiKey')?.addEventListener('click', () => {
+      const k = document.getElementById('inputGeminiApiKey').value.trim();
+      localStorage.setItem('mistake_gemini_api_key', k);
+      document.getElementById('aiKeyDrawer').style.display = 'none';
+      showToast(k ? '🔑 已儲存 Gemini API Key！點「🪄 自動分析」將啟用 AI 截圖視覺深度解析。' : '已清除 API Key，將使用內建智慧題型診斷引擎。');
+    });
+  }
 
   // Reset Form
   document.getElementById('btnResetForm').addEventListener('click', () => {
@@ -1308,51 +1554,292 @@ function setOptionPillAndInput(which, val, updateInput = true) {
   });
 }
 
-function updateGuidedPromptUI() {
-  const promptQ = document.getElementById('guidedPromptQuestion');
-  const chipsContainer = document.getElementById('quickPhraseChips');
-  const wrongAns = document.getElementById('fieldWrongAnswer').value.trim();
-  const correctAns = document.getElementById('fieldCorrectAnswer').value.trim();
+// ============================================================================
+// Built-In Smart Linguistic & Subject Diagnostic Generator
+// Tells the student WHERE they judged wrong and HOW to solve it correctly!
+// ============================================================================
+function runAutoMistakeDiagnosis(forceOverwrite = true) {
+  const wrongAns = document.getElementById('fieldWrongAnswer').value.trim().toUpperCase();
+  const correctAns = document.getElementById('fieldCorrectAnswer').value.trim().toUpperCase();
+  const qNum = document.getElementById('fieldQuestionNum').value.trim() || '';
+  const stem = document.getElementById('fieldQuestionText').value.trim();
+  const opts = {
+    A: document.getElementById('fieldOptA').value.trim(),
+    B: document.getElementById('fieldOptB').value.trim(),
+    C: document.getElementById('fieldOptC').value.trim(),
+    D: document.getElementById('fieldOptD').value.trim()
+  };
 
-  const tags = Array.from(state.selectedErrorTags);
-  if (tags.length === 0) {
-    promptQ.textContent =
-      '💡 診斷引導：請先點選上方的「錯誤類型標籤」，系統會根據你選的誤選答案與正解，提供具體的反思提問與快填句型！';
-    chipsContainer.innerHTML = '';
+  if (!wrongAns || !correctAns) {
     return;
   }
 
-  const primaryTag = tags[tags.length - 1];
-  const guide = DIAGNOSIS_GUIDES[primaryTag];
-  if (!guide) return;
+  const wrongText = opts[wrongAns] || `選項 (${wrongAns})`;
+  const correctText = opts[correctAns] || `選項 (${correctAns})`;
+  const allOptsJoined = `${opts.A} ${opts.B} ${opts.C} ${opts.D}`.toLowerCase();
 
-  promptQ.textContent = guide.question(wrongAns, correctAns);
+  let autoTag = '觀念混淆';
+  let whyWrong = '';
+  let correctConcept = '';
+  let keyTakeaway = '';
 
-  // Combine quick phrases from all selected tags
-  const allPhrases = [];
-  tags.forEach((t) => {
-    if (DIAGNOSIS_GUIDES[t]) {
-      DIAGNOSIS_GUIDES[t].phrases.forEach((p) => allPhrases.push(p));
+  // -------------------------------------------------------------------------
+  // Case 1: 英文關係代名詞 / 關係子句 (that / who / whom / which / whose / where)
+  // -------------------------------------------------------------------------
+  const relPronouns = ['that', 'who', 'whom', 'which', 'whose', 'where', 'when', 'what'];
+  const isRelPronounQ =
+    relPronouns.includes(wrongText.toLowerCase()) ||
+    relPronouns.includes(correctText.toLowerCase());
+
+  if (isRelPronounQ) {
+    autoTag = '文法與詞性判斷';
+    const wLow = wrongText.toLowerCase();
+    const cLow = correctText.toLowerCase();
+
+    const relExplainMap = {
+      that: '「that」雖可代替人或物，但【絕對不能用在逗號 ( , ) 後方的非限定關係子句】，也不能直接放在介系詞後面！',
+      who: '「who」用於先行詞是【人】，且在關係子句中擔任【主詞】（後面緊接動詞，如 have / is / V）！',
+      whom: '「whom」用於先行詞是【人】，且在關係子句中擔任【受詞】（後面會接「主詞＋動詞」）或放在介系詞後！',
+      which: '「which」用於先行詞是【事物／動物】或代表前面整個子句，不能用來指代「人（如 people / students）」！',
+      whose: '「whose」是所有格關代（翻譯為「...的」），後面必須緊接一個【名詞】！'
+    };
+
+    whyWrong = `你選了 (${wrongAns}) ${wrongText}，但正確答案是 (${correctAns}) ${correctText}。\n判斷錯誤點：${
+      relExplainMap[wLow] || `誤判了關係代名詞「${wrongText}」的先行詞或子句結構。`
+    }`;
+
+    correctConcept = `【這題應該這樣寫】：\n1. 先找空格前的「先行詞」是人還是物（若為 people / person 等人，先排除 which）。\n2. 檢查空格前後有沒有「逗號 ,」（若有逗號屬於補述用法，不可選 that）。\n3. 看空格後面緊接的是「動詞」還是「主詞＋動詞」：${
+      relExplainMap[cLow] || `因此此處必須填入 (${correctAns}) ${correctText}。`
+    }`;
+
+    keyTakeaway = `關代秒殺三步驟：①看先行詞(人/物) ②看有無逗號(有逗號禁選 that) ③看後接動詞(選主格 who)還是主詞(選受格 whom)！`;
+  }
+  // -------------------------------------------------------------------------
+  // Case 2: 英文詞性變化題 (e.g., mad / madness / madly / madden, pollute / pollution...)
+  // -------------------------------------------------------------------------
+  else if (isEnglishWordFamilyQuestion(opts)) {
+    autoTag = '文法與詞性判斷';
+    const wPos = guessEnglishPartOfSpeech(wrongText);
+    const cPos = guessEnglishPartOfSpeech(correctText);
+
+    whyWrong = `你選了 (${wrongAns}) ${wrongText}（${wPos}），但此空格在句子結構中需要的詞性是「${cPos}」，所以不能選 (${wrongAns})！`;
+    correctConcept = `【這題應該這樣寫】：\n這題是經典的「詞性判斷題（同字根變化）」！\n1. 觀察空格前後的字詞結構，判斷空格缺的是主詞/受詞（填名詞）、修飾名詞或作受詞補語（填形容詞）、修飾一般動詞/整句（填副詞 -ly），還是助動詞/to 後面（填原形動詞）。\n2. 選項中 (${correctAns}) ${correctText} 為【${cPos}】，完全符合此句型位置需求，故選 (${correctAns})。`;
+    keyTakeaway = `遇到四個選項長得很像的「詞性題」，先看空格前後決定詞性（-ness/-tion 名詞、-ly 副詞、-en/-ize 動詞），不用硬翻整段文章就能秒殺！`;
+  }
+  // -------------------------------------------------------------------------
+  // Case 3: 英文片語、連接詞與常見必考字彙辨析
+  // -------------------------------------------------------------------------
+  else if (isEnglishOptionSet(opts)) {
+    const phraseDict = {
+      'used for': 'be used for + V-ing（被用來做...，主詞通常是物品）',
+      'keen on': 'be keen on + V-ing（熱衷於、喜愛做...）',
+      'tired of': 'be tired of + V-ing（對...感到厭倦、受夠了...）',
+      'amazed by': 'be amazed by（對...感到驚奇讚嘆）',
+      'for a while': 'for a while（持續一小段時間）',
+      'for example': 'for example（舉例來說，用於舉出具體實例）',
+      'in the end': 'in the end（最後、終於，表結果）',
+      'all of a sudden': 'all of a sudden（突然間＝suddenly，表突發狀況）',
+      'go through': 'go through（經歷困難、仔細檢查）',
+      'carry out': 'carry out（執行、實行計畫或命令）',
+      'call on': 'call on（拜訪；呼籲、號召某人做某事）',
+      'come across': 'come across（偶然遇見、無意間發現）',
+      'because': 'because + 完整子句 (S + V)（因為...）',
+      'because of': 'because of + 名詞 / V-ing（因為...，後面絕對不能接完整子句）',
+      'since': 'since（自從...；既然/因為，後接子句）',
+      'once': 'once + 子句（一旦...就...）',
+      'in case': 'in case + 子句（以防萬一...，表事先準備）',
+      'even though': 'even though + 子句（儘管、雖然...，表讓步轉折）',
+      'as soon as': 'as soon as + 子句（一...就...）',
+      'unless': 'unless + 子句（除非...＝if...not）',
+      'infected': 'infected（adj. 受感染的，常搭配 be infected with）',
+      'sensitive': 'sensitive（adj. 敏感的、易受傷害的，常搭配 be sensitive to 對...敏感）',
+      'creative': 'creative（adj. 有創意的）',
+      'plastic': 'plastic（n./adj. 塑膠的）',
+      'distance': 'distance（n. 距離）',
+      'convenience': 'convenience（n. 便利、方便）',
+      'survival': 'survival（n. 生存、存活）',
+      'substance': 'substance（n. 物質、化學物質）'
+    };
+
+    const wMeaning = phraseDict[wrongText.toLowerCase()] || `「${wrongText}」`;
+    const cMeaning = phraseDict[correctText.toLowerCase()] || `「${correctText}」`;
+
+    autoTag = '片語與字彙搭配';
+    whyWrong = `你選了 (${wrongAns}) ${wrongText}，它的意思是 ${wMeaning}。放進本題前後文時，語意邏輯或後面接的詞性搭配不符，因此判斷錯誤。`;
+    correctConcept = `【這題應該這樣寫】：\n1. 先看空格前後的關鍵字與介系詞／子句結構。\n2. 正確答案 (${correctAns}) ${correctText} 的用法為 ${cMeaning}，帶入句中不論是上下文語意還是文法搭配都完全吻合！`;
+    keyTakeaway = `必背對比：誤選的 ${wrongText} vs. 正解 ${cMeaning}，記住後面的介系詞與上下文語氣！`;
+  }
+  // -------------------------------------------------------------------------
+  // Case 4: 數學、自然科學、社會與各科通用智慧診斷
+  // -------------------------------------------------------------------------
+  else {
+    const isAskWrong = /何者錯誤|何者有誤|不正確|不包括|何者為非/.test(stem);
+    if (isAskWrong) {
+      autoTag = '審題失誤';
+      whyWrong = `這題題幹問的是「何者錯誤／不正確」！你選的 (${wrongAns})「${wrongText}」本身敘述其實是正確的（或你把題目看成選正確選項而誤選）。`;
+      correctConcept = `【這題應該這樣寫】：\n1. 看到題目問「何者錯誤」，先在「錯誤」兩個字下面畫雙底線。\n2. 逐一在 (A)(B)(C)(D) 旁邊標註 ⭕ 或 ❌，其中 (${correctAns})「${correctText}」的敘述違反核心定義，才是本題要找的「錯誤選項」！`;
+      keyTakeaway = `題目問「何者錯誤」時，務必先在選項旁標出 ⭕/❌，最後挑出打 ❌ 的 (${correctAns})！`;
+    } else {
+      autoTag = '觀念混淆';
+      whyWrong = `你誤選了 (${wrongAns})「${wrongText}」，是因為將它的適用條件與正確答案 (${correctAns})「${correctText}」混淆了（或計算／判讀時忽略了題目給的關鍵限制條件）。`;
+      correctConcept = `【這題應該這樣寫】：\n根據題目條件，正確的推導結果應為 (${correctAns})「${correctText}」。作答時應先圈出題幹關鍵字，排除誘答選項 (${wrongAns})，鎖定 (${correctAns}) 的核心定義。`;
+      keyTakeaway = `區分盲點：❌ (${wrongAns}) ${wrongText.slice(0, 18)} vs. ✅ (${correctAns}) ${correctText.slice(0, 18)}！`;
     }
-  });
+  }
 
-  chipsContainer.innerHTML = allPhrases
-    .map(
-      (phrase) =>
-        `<span class="quick-phrase-chip" data-phrase="${escapeHtml(phrase)}">＋ ${escapeHtml(phrase)}</span>`
-    )
-    .join('');
-
-  chipsContainer.querySelectorAll('.quick-phrase-chip').forEach((chip) => {
-    chip.addEventListener('click', () => {
-      const p = chip.getAttribute('data-phrase');
-      const whyField = document.getElementById('fieldWhyWrong');
-      whyField.value = whyField.value
-        ? `${whyField.value.trim()}；${p}`
-        : p;
-      whyField.focus();
+  // Update Error Tag Selection UI if none manually clicked yet
+  if (state.selectedErrorTags.size === 0) {
+    state.selectedErrorTags.add(autoTag);
+    document.querySelectorAll('#errorTagsContainer .diagnosis-tag').forEach((b) => {
+      b.classList.toggle('selected', b.getAttribute('data-tag') === autoTag);
     });
-  });
+  }
+
+  if (forceOverwrite || !document.getElementById('fieldWhyWrong').value.trim()) {
+    document.getElementById('fieldWhyWrong').value = whyWrong;
+    document.getElementById('fieldCorrectConcept').value = correctConcept;
+    document.getElementById('fieldKeyTakeaway').value = keyTakeaway;
+  }
+
+  document.getElementById('previewWhyWrong').textContent =
+    document.getElementById('fieldWhyWrong').value;
+  document.getElementById('previewCorrectConcept').textContent =
+    document.getElementById('fieldCorrectConcept').value;
+  document.getElementById('previewKeyTakeaway').textContent =
+    document.getElementById('fieldKeyTakeaway').value;
+
+  const badge = document.getElementById('autoDiagnosisStatusBadge');
+  if (badge) {
+    badge.textContent = `🤖 已根據「誤選 (${wrongAns}) vs 正解 (${correctAns})」自動產生錯因診斷與正確解法！（看完即可直接儲存）`;
+  }
+}
+
+function isEnglishOptionSet(opts) {
+  const combined = `${opts.A} ${opts.B} ${opts.C} ${opts.D}`.trim();
+  if (!combined) return false;
+  const asciiLetters = (combined.match(/[A-Za-z]/g) || []).length;
+  return asciiLetters > combined.length * 0.45;
+}
+
+function isEnglishWordFamilyQuestion(opts) {
+  const words = [opts.A, opts.B, opts.C, opts.D]
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => /^[a-z]+$/.test(s));
+  if (words.length < 3) return false;
+  const prefix3 = words[0].slice(0, 3);
+  return prefix3.length === 3 && words.every((w) => w.startsWith(prefix3));
+}
+
+function guessEnglishPartOfSpeech(word) {
+  const w = word.trim().toLowerCase();
+  if (/(ness|tion|sion|ment|ity|ance|ence|ship|ist|er|or|ant)$/.test(w)) {
+    return '名詞 (n.)';
+  }
+  if (/ly$/.test(w)) {
+    return '副詞 (adv.，修飾動詞或形容詞)';
+  }
+  if (/(en|ize|ise|fy|ate)$/.test(w)) {
+    return '動詞 (v.)';
+  }
+  if (/(ive|ous|ful|less|able|ible|al|ic|ed|ing|ant|ent)$/.test(w)) {
+    return '形容詞 / 分詞 (adj.)';
+  }
+  return '原形詞 / 形容詞或動詞';
+}
+
+// Optional Gemini Vision Deep Analysis (if user entered Gemini API Key)
+async function runGeminiVisionDiagnosis(apiKey) {
+  const wrongAns = document.getElementById('fieldWrongAnswer').value.trim().toUpperCase();
+  const correctAns = document.getElementById('fieldCorrectAnswer').value.trim().toUpperCase();
+  const qNum = document.getElementById('fieldQuestionNum').value.trim();
+  const stem = document.getElementById('fieldQuestionText').value.trim();
+  const opts = {
+    A: document.getElementById('fieldOptA').value.trim(),
+    B: document.getElementById('fieldOptB').value.trim(),
+    C: document.getElementById('fieldOptC').value.trim(),
+    D: document.getElementById('fieldOptD').value.trim()
+  };
+
+  if (!wrongAns || !correctAns) {
+    alert('請先在 STEP 2 選擇「我選錯的答案」與「試卷正確答案」！');
+    return;
+  }
+
+  const badge = document.getElementById('autoDiagnosisStatusBadge');
+  if (badge) badge.textContent = '⏳ 正在透過 AI 視覺與題目深度分析您的錯因...';
+
+  try {
+    const parts = [
+      {
+        text: `你是一位溫柔且極具教學經驗的中學名師。學生在試卷第 ${qNum || '?'} 題選了錯誤答案 (${wrongAns})，但正確答案是 (${correctAns})。
+目前題目文字：${stem}
+選項：(A) ${opts.A} (B) ${opts.B} (C) ${opts.C} (D) ${opts.D}
+請根據題目文字與附圖（若有），回傳純 JSON 格式（不要加 markdown 標籤）：
+{
+  "questionText": "若附圖中有更完整的題目或克漏字句子，請補全題目文字，否則回傳原題目",
+  "optA": "選項A文字",
+  "optB": "選項B文字",
+  "optC": "選項C文字",
+  "optD": "選項D文字",
+  "whyWrong": "直接告訴學生他選 (${wrongAns}) 判斷錯誤的地方在哪裡（簡明扼要 2 句話內）",
+  "correctConcept": "告訴學生這一題應該怎麼看、怎麼寫才正確（清楚步驟 2~3 句話）",
+  "keyTakeaway": "給學生的一句話秒殺記憶口訣"
+}`
+      }
+    ];
+
+    if (state.currentCropDataUrl && state.currentCropDataUrl.startsWith('data:image/')) {
+      const base64Data = state.currentCropDataUrl.split(',')[1];
+      parts.push({
+        inline_data: {
+          mime_type: 'image/png',
+          data: base64Data
+        }
+      });
+    }
+
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts }] })
+      }
+    );
+
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const rawReply = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const jsonMatch = rawReply.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.questionText && parsed.questionText.length > 5) {
+        document.getElementById('fieldQuestionText').value = parsed.questionText;
+      }
+      if (parsed.optA && !opts.A) document.getElementById('fieldOptA').value = parsed.optA;
+      if (parsed.optB && !opts.B) document.getElementById('fieldOptB').value = parsed.optB;
+      if (parsed.optC && !opts.C) document.getElementById('fieldOptC').value = parsed.optC;
+      if (parsed.optD && !opts.D) document.getElementById('fieldOptD').value = parsed.optD;
+
+      if (parsed.whyWrong) {
+        document.getElementById('fieldWhyWrong').value = parsed.whyWrong;
+        document.getElementById('previewWhyWrong').textContent = parsed.whyWrong;
+      }
+      if (parsed.correctConcept) {
+        document.getElementById('fieldCorrectConcept').value = parsed.correctConcept;
+        document.getElementById('previewCorrectConcept').textContent = parsed.correctConcept;
+      }
+      if (parsed.keyTakeaway) {
+        document.getElementById('fieldKeyTakeaway').value = parsed.keyTakeaway;
+        document.getElementById('previewKeyTakeaway').textContent = parsed.keyTakeaway;
+      }
+      if (badge) badge.textContent = '✨ AI 視覺深度診斷完成！';
+      showToast('✨ AI 已根據題目截圖與您的選擇完成深度診斷！');
+    }
+  } catch (err) {
+    console.warn('Gemini Vision API fallback to built-in analyzer:', err);
+    if (badge) badge.textContent = '🤖 已使用內建智慧題型診斷引擎完成分析！';
+  }
 }
 
 function saveCurrentMistakeForm(silentRedirect = false) {
@@ -1366,25 +1853,20 @@ function saveCurrentMistakeForm(silentRedirect = false) {
   const optD = document.getElementById('fieldOptD').value.trim();
   const wrongAnswer = document.getElementById('fieldWrongAnswer').value.trim().toUpperCase();
   const correctAnswer = document.getElementById('fieldCorrectAnswer').value.trim().toUpperCase();
+
+  if (!wrongAnswer || !correctAnswer) {
+    alert('請在 STEP 2 點選「❌ 我當初選錯的答案」與「✅ 試卷正確答案」！');
+    return false;
+  }
+
+  // Ensure auto-diagnosis has populated STEP 3 so student never has to type manually!
+  if (!document.getElementById('fieldWhyWrong').value.trim()) {
+    runAutoMistakeDiagnosis(true);
+  }
+
   const whyWrong = document.getElementById('fieldWhyWrong').value.trim();
   const correctConcept = document.getElementById('fieldCorrectConcept').value.trim();
   const keyTakeaway = document.getElementById('fieldKeyTakeaway').value.trim();
-
-  if (!wrongAnswer || !correctAnswer) {
-    alert('請填寫「我當初選錯的答案」與「試卷正確答案」！');
-    return false;
-  }
-
-  if (wrongAnswer === correctAnswer) {
-    if (!confirm('您填寫的「錯誤答案」與「正確答案」相同，確定要繼續儲存嗎？')) {
-      return false;
-    }
-  }
-
-  if (!whyWrong || !correctConcept || !keyTakeaway) {
-    alert('請完成 STEP 3 的錯題診斷（為何選錯、正確觀念、避坑錦囊），這能幫助你在後續練習時真正強化觀念！');
-    return false;
-  }
 
   const errorTags =
     state.selectedErrorTags.size > 0
@@ -1400,7 +1882,7 @@ function saveCurrentMistakeForm(silentRedirect = false) {
     unit,
     questionNum,
     questionText:
-      questionText || `（第 ${questionNum} 題 - 請參照上方試卷題目截圖）`,
+      questionText || `第 ${questionNum} 題（請參照試卷截圖上下文選出正確選項）`,
     optA,
     optB,
     optC,
@@ -1436,7 +1918,7 @@ function saveCurrentMistakeForm(silentRedirect = false) {
 
   if (!silentRedirect) {
     showToast(
-      `✅ 已儲存第 ${questionNum} 題錯題診斷！可至「錯題診斷卡」下載 PNG 或開始「強化練習」。`
+      `✅ 已自動分析並儲存第 ${questionNum} 題！可至「錯題診斷卡」下載 PNG 或開始「強化練習」。`
     );
   }
   return true;
@@ -1445,8 +1927,8 @@ function saveCurrentMistakeForm(silentRedirect = false) {
 function resetMistakeForm(keepMetadata = false) {
   document.getElementById('editingMistakeId').value = '';
   if (!keepMetadata) {
-    document.getElementById('fieldSubject').value = '自然科學';
-    document.getElementById('fieldUnit').value = '第一次段考複習卷';
+    document.getElementById('fieldSubject').value = '英文';
+    document.getElementById('fieldUnit').value = '段考複習卷';
   }
   document.getElementById('fieldQuestionNum').value = '';
   document.getElementById('fieldQuestionText').value = '';
@@ -1460,15 +1942,22 @@ function resetMistakeForm(keepMetadata = false) {
   document.getElementById('fieldWhyWrong').value = '';
   document.getElementById('fieldCorrectConcept').value = '';
   document.getElementById('fieldKeyTakeaway').value = '';
+  document.getElementById('previewWhyWrong').textContent =
+    '請先在 STEP 2 點選「我選錯的答案」與「正確答案」...';
+  document.getElementById('previewCorrectConcept').textContent =
+    '系統將根據題目與正確選項自動為你解析...';
+  document.getElementById('previewKeyTakeaway').textContent =
+    '自動產生重點提醒...';
+  const multiBar = document.getElementById('multiQuestionSelectorBar');
+  if (multiBar) multiBar.style.display = 'none';
   setCroppedImagePreview('');
 
   state.selectedErrorTags.clear();
   document
     .querySelectorAll('#errorTagsContainer .diagnosis-tag')
     .forEach((b) => b.classList.remove('selected'));
-  updateGuidedPromptUI();
   document.getElementById('btnSubmitMistake').textContent =
-    '✅ 儲存這筆錯題（加入錯題卡與試算表）';
+    '✅ 看懂了！存入錯題本與試算表';
 }
 
 // ============================================================================
@@ -1734,6 +2223,9 @@ window.editMistakeById = function (id) {
   document.getElementById('fieldWhyWrong').value = m.whyWrong;
   document.getElementById('fieldCorrectConcept').value = m.correctConcept;
   document.getElementById('fieldKeyTakeaway').value = m.keyTakeaway;
+  document.getElementById('previewWhyWrong').textContent = m.whyWrong;
+  document.getElementById('previewCorrectConcept').textContent = m.correctConcept;
+  document.getElementById('previewKeyTakeaway').textContent = m.keyTakeaway;
   setCroppedImagePreview(m.cropImageDataUrl || '');
 
   state.selectedErrorTags = new Set(m.errorTags || []);
@@ -1743,7 +2235,6 @@ window.editMistakeById = function (id) {
       state.selectedErrorTags.has(b.getAttribute('data-tag'))
     );
   });
-  updateGuidedPromptUI();
   document.getElementById('btnSubmitMistake').textContent = '💾 更新這筆錯題紀錄';
   window.scrollTo({ top: 0, behavior: 'smooth' });
 };
