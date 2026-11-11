@@ -270,6 +270,7 @@
                   <label class="form-label">🎯 本題題型</label>
                   <div class="error-tags-grid" id="questionTypeContainer" style="margin-bottom:0;">
                     <button type="button" class="diagnosis-tag selected" data-qtype="choice" id="qtypeBtnChoice">🔘 單選題／克漏字</button>
+                    <button type="button" class="diagnosis-tag" data-qtype="wordbank" id="qtypeBtnWordBank">🔠 文意選填 (A~J 十選十)</button>
                     <button type="button" class="diagnosis-tag" data-qtype="multiselect" id="qtypeBtnMulti">☑️ 多選題</button>
                     <button type="button" class="diagnosis-tag" data-qtype="fill" id="qtypeBtnFill">🔤 文意字彙／填充題</button>
                     <button type="button" class="diagnosis-tag" data-qtype="translation" id="qtypeBtnTrans">✍️ 翻譯／手寫非選題</button>
@@ -365,6 +366,28 @@
                     <label class="form-label" id="labelOptE">選項 (E) / (5)（五選一或多選題第 5 選項）</label>
                     <input type="text" class="form-input" id="fieldOptE" placeholder="第 5 個選項內容（四選一可留空）" />
                   </div>
+                  <div id="groupWordBankFJ" style="grid-column: 1 / -1; display:none; grid-template-columns: 1fr 1fr; gap:0.65rem;">
+                    <div class="form-group">
+                      <label class="form-label" id="labelOptF">選項 (F)</label>
+                      <input type="text" class="form-input" id="fieldOptF" placeholder="選項 F 單字／片語" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" id="labelOptG">選項 (G)</label>
+                      <input type="text" class="form-input" id="fieldOptG" placeholder="選項 G 單字／片語" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" id="labelOptH">選項 (H)</label>
+                      <input type="text" class="form-input" id="fieldOptH" placeholder="選項 H 單字／片語" />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label" id="labelOptI">選項 (I)</label>
+                      <input type="text" class="form-input" id="fieldOptI" placeholder="選項 I 單字／片語" />
+                    </div>
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                      <label class="form-label" id="labelOptJ">選項 (J)</label>
+                      <input type="text" class="form-input" id="fieldOptJ" placeholder="選項 J 單字／片語" />
+                    </div>
+                  </div>
                 </div>
 
                 <!-- 🧭 Autonomous Self-Directed Learning Coach (自主學習三階段引導中心 - 依科目與試題動態切換) -->
@@ -448,12 +471,17 @@
                   <!-- Student's Wrong Answer -->
                   <div class="choice-box wrong-box">
                     <label class="form-label" id="labelWrongAns" style="color:#b91c1c;">❌ 我當初選錯的答案</label>
-                    <div class="option-pills" id="wrongOptionPills">
+                    <div class="option-pills" id="wrongOptionPills" style="flex-wrap:wrap;">
                       <button type="button" class="option-pill" data-val="A" data-num="1">A</button>
                       <button type="button" class="option-pill" data-val="B" data-num="2">B</button>
                       <button type="button" class="option-pill" data-val="C" data-num="3">C</button>
                       <button type="button" class="option-pill" data-val="D" data-num="4">D</button>
                       <button type="button" class="option-pill" data-val="E" data-num="5" style="display:none;">E</button>
+                      <button type="button" class="option-pill" data-val="F" data-num="6" style="display:none;">F</button>
+                      <button type="button" class="option-pill" data-val="G" data-num="7" style="display:none;">G</button>
+                      <button type="button" class="option-pill" data-val="H" data-num="8" style="display:none;">H</button>
+                      <button type="button" class="option-pill" data-val="I" data-num="9" style="display:none;">I</button>
+                      <button type="button" class="option-pill" data-val="J" data-num="10" style="display:none;">J</button>
                     </div>
                     <input type="text" class="form-input" id="fieldWrongAnswer" placeholder="點選上方按鈕或直接輸入錯誤答案" style="margin-top:0.5rem;" required />
                   </div>
@@ -461,12 +489,17 @@
                   <!-- Correct Answer -->
                   <div class="choice-box correct-box">
                     <label class="form-label" id="labelCorrectAns" style="color:#15803d;">✅ 試卷正確答案</label>
-                    <div class="option-pills" id="correctOptionPills">
+                    <div class="option-pills" id="correctOptionPills" style="flex-wrap:wrap;">
                       <button type="button" class="option-pill" data-val="A" data-num="1">A</button>
                       <button type="button" class="option-pill" data-val="B" data-num="2">B</button>
                       <button type="button" class="option-pill" data-val="C" data-num="3">C</button>
                       <button type="button" class="option-pill" data-val="D" data-num="4">D</button>
                       <button type="button" class="option-pill" data-val="E" data-num="5" style="display:none;">E</button>
+                      <button type="button" class="option-pill" data-val="F" data-num="6" style="display:none;">F</button>
+                      <button type="button" class="option-pill" data-val="G" data-num="7" style="display:none;">G</button>
+                      <button type="button" class="option-pill" data-val="H" data-num="8" style="display:none;">H</button>
+                      <button type="button" class="option-pill" data-val="I" data-num="9" style="display:none;">I</button>
+                      <button type="button" class="option-pill" data-val="J" data-num="10" style="display:none;">J</button>
                     </div>
                     <input type="text" class="form-input" id="fieldCorrectAnswer" placeholder="點選上方按鈕或直接輸入正確答案" style="margin-top:0.5rem;" required />
                   </div>

@@ -699,14 +699,14 @@ function initPdfViewerAndCrop() {
   });
 
   btnToggleCrop.addEventListener('click', () => {
-    state.cropTarget = 'question';
-    setCropMode(!state.cropMode, 'question');
+    const shouldEnable = !(state.cropMode && state.cropTarget === 'question');
+    setCropMode(shouldEnable, 'question');
   });
 
   if (btnCropPassage) {
     btnCropPassage.addEventListener('click', () => {
-      state.cropTarget = 'passage';
-      setCropMode(true, 'passage');
+      const shouldEnable = !(state.cropMode && state.cropTarget === 'passage');
+      setCropMode(shouldEnable, 'passage');
     });
   }
 
@@ -717,25 +717,48 @@ function initPdfViewerAndCrop() {
 }
 
 function setCropMode(enabled, modeType = 'question') {
-  state.cropMode = enabled;
-  state.cropTarget = modeType;
+  state.cropMode = Boolean(enabled);
+  state.cropTarget = modeType || 'question';
   const btn = document.getElementById('btnToggleCropMode');
+  const btnPassage = document.getElementById('btnCropPassageMode');
   const overlay = document.getElementById('cropOverlayCanvas');
   const banner = document.getElementById('cropHintBanner');
 
-  btn.classList.toggle('active', enabled && modeType === 'question');
-  btn.textContent =
-    enabled && modeType === 'question'
+  if (btn) {
+    const isQuestionCrop = state.cropMode && state.cropTarget === 'question';
+    btn.classList.toggle('active', isQuestionCrop);
+    btn.textContent = isQuestionCrop
       ? '🛑 結束框選（請在下方試卷拖曳框選該題）'
       : '✂️ 框選題目與選項';
-  overlay.classList.toggle('active', enabled);
-  if (banner) {
-    banner.style.display = enabled ? 'block' : 'none';
-    banner.textContent =
-      modeType === 'passage'
-        ? '📖 【加框克漏字文章模式】請在下方試卷拖曳框選「克漏字文章段落（例如含 __19__ 的那段文字）」，系統會自動將文章截圖拼接到選項上方並帶入上下文！'
-        : '💡 請在下方試卷上「拖曳框選你要的那一題（例如第 19 題）」，系統會精準抓取該題選項並過濾上下題干擾！';
   }
+  if (btnPassage) {
+    const isPassageCrop = state.cropMode && state.cropTarget === 'passage';
+    btnPassage.classList.toggle('active', isPassageCrop);
+    btnPassage.style.background = isPassageCrop
+      ? '#ef4444'
+      : 'rgba(255,255,255,0.15)';
+    btnPassage.style.color = '#ffffff';
+    btnPassage.textContent = isPassageCrop
+      ? '🛑 結束文章框選（請在試卷拖曳框選文章段落）'
+      : '📖 加框克漏字／文意選填文章';
+  }
+  if (overlay) {
+    overlay.classList.toggle('active', state.cropMode);
+  }
+  if (banner) {
+    banner.style.display = state.cropMode ? 'block' : 'none';
+    banner.textContent =
+      state.cropTarget === 'passage'
+        ? '📖 【加框克漏字／文意選填文章模式】請在下方試卷拖曳框選「文章段落或 (A)~(J) 選項框」，系統會自動將文章截圖拼接到上方、抓出對應空格句子並提供多空格切換按鈕！'
+        : '💡 請在下方試卷上「拖曳框選你要的那一題（例如第 36 題或整段文意選填）」，系統會自動抓取題幹、文意選填 (A)~(J) 詞庫與對應文章句子！';
+  }
+}
+
+function withTimeout(promise, ms = 1400, fallbackValue = null) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(fallbackValue), ms))
+  ]);
 }
 
 function switchDocSlot(slot) {
@@ -760,7 +783,13 @@ async function handleDocFileUpload(slot, file) {
 
   if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
     const arrayBuf = await file.arrayBuffer();
-    const pdfDoc = await window.pdfjsLib.getDocument({ data: arrayBuf }).promise;
+    const pdfDoc = await window.pdfjsLib.getDocument({
+      data: arrayBuf,
+      cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+      cMapPacked: true,
+      standardFontDataUrl:
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/standard_fonts/'
+    }).promise;
     docState.type = 'pdf';
     docState.pdfDoc = pdfDoc;
     docState.pageNum = 1;
@@ -1059,9 +1088,13 @@ function initCropCanvasMouseEvents() {
     ctx.strokeRect(rx, ry, rw, rh);
   });
 
-  overlay.addEventListener('mouseup', async (evt) => {
+  const finishCropSelection = async (evt) => {
     if (!state.cropMode || !state.isDraggingCrop) return;
     state.isDraggingCrop = false;
+    const activeTarget = state.cropTarget || 'question';
+    // Immediately exit crop mode BEFORE any async image stitching / PDF / OCR calls so the UI NEVER gets stuck!
+    setCropMode(false, 'question');
+
     const pos = getCanvasCoords(evt);
     const overlayCtx = overlay.getContext('2d');
     overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
@@ -1081,8 +1114,8 @@ function initCropCanvasMouseEvents() {
     tCtx.drawImage(pdfCanvas, rx, ry, rw, rh, 0, 0, rw, rh);
     const croppedDataUrl = tempCanvas.toDataURL('image/png');
 
-    if (state.cropTarget === 'passage' && state.currentCropDataUrl) {
-      // Stitch Cloze passage image ABOVE existing question options image
+    if (activeTarget === 'passage' && state.currentCropDataUrl) {
+      // Stitch Cloze / Word Bank passage image ABOVE existing question options image
       const mergedDataUrl = await stitchTwoImagesVertically(
         croppedDataUrl,
         state.currentCropDataUrl
@@ -1091,9 +1124,15 @@ function initCropCanvasMouseEvents() {
       await extractTextFromCropRegion(rx, ry, rw, rh, 'passage');
     } else {
       setCroppedImagePreview(croppedDataUrl);
-      await extractTextFromCropRegion(rx, ry, rw, rh, state.cropTarget || 'question');
+      await extractTextFromCropRegion(rx, ry, rw, rh, activeTarget);
     }
-    setCropMode(false, 'question');
+  };
+
+  overlay.addEventListener('mouseup', finishCropSelection);
+  window.addEventListener('mouseup', (evt) => {
+    if (state.cropMode && state.isDraggingCrop) {
+      finishCropSelection(evt);
+    }
   });
 }
 
@@ -1140,6 +1179,19 @@ function setCroppedImagePreview(dataUrl) {
 async function extractTextFromCropRegion(rx, ry, rw, rh, modeType = 'question') {
   const docState = state.docs[state.activeDocSlot];
 
+  // Immediately infer subject & unit from filename BEFORE any async PDF/OCR operations so UI updates right away
+  if (docState.fileName) {
+    if (/英文|English/i.test(docState.fileName)) {
+      document.getElementById('fieldSubject').value = '英文';
+    } else if (/數學|Math/i.test(docState.fileName)) {
+      document.getElementById('fieldSubject').value = '數學';
+    } else if (/自然|物理|化學|生物/i.test(docState.fileName)) {
+      document.getElementById('fieldSubject').value = '自然科學';
+    }
+    document.getElementById('fieldUnit').value = docState.fileName.replace(/\.pdf$/i, '');
+    syncSubjectSpecificUI();
+  }
+
   if (docState.type === 'sample') {
     const unscaledYCenter = (ry + rh / 2) / docState.scale;
     const matched = docState.sampleItems.find(
@@ -1163,71 +1215,105 @@ async function extractTextFromCropRegion(rx, ry, rw, rh, modeType = 'question') 
     }
   }
 
+  let joinedText = '';
+  let fullPageText = '';
+
   if (docState.type === 'pdf' && docState.pdfDoc) {
     try {
-      const page = await docState.pdfDoc.getPage(docState.pageNum);
-      const viewport = page.getViewport({ scale: docState.scale });
-      const textContent = await page.getTextContent();
-
-      // Auto-infer subject from PDF filename if obvious
-      if (docState.fileName) {
-        if (/英文|English/i.test(docState.fileName)) {
-          document.getElementById('fieldSubject').value = '英文';
-        } else if (/數學|Math/i.test(docState.fileName)) {
-          document.getElementById('fieldSubject').value = '數學';
-        } else if (/自然|物理|化學|生物/i.test(docState.fileName)) {
-          document.getElementById('fieldSubject').value = '自然科學';
-        }
-        document.getElementById('fieldUnit').value = docState.fileName.replace(/\.pdf$/i, '');
-      }
-
-      // Strict center-based bounding box filter so adjacent lines (like Q18 above or Q20 below) never leak in!
-      const itemsInBox = [];
-      for (const item of textContent.items) {
-        if (!item.str || !item.str.trim()) continue;
-        const tx = window.pdfjsLib.Util.transform(
-          viewport.transform,
-          item.transform
+      const page = await withTimeout(
+        docState.pdfDoc.getPage(docState.pageNum),
+        1200,
+        null
+      );
+      if (page) {
+        const viewport = page.getViewport({ scale: docState.scale });
+        const textContent = await withTimeout(
+          page.getTextContent(),
+          1400,
+          null
         );
-        const fontH = Math.hypot(tx[2], tx[3]) || 12;
-        const itemW = (item.width || 8) * docState.scale;
-        // tx[4] is left X, tx[5] is baseline Y (character body sits above baseline)
-        const centerX = tx[4] + Math.min(itemW * 0.25, 12);
-        const centerY = tx[5] - fontH * 0.35;
 
-        if (
-          centerX >= rx - 3 &&
-          centerX <= rx + rw + 3 &&
-          centerY >= ry - 2 &&
-          centerY <= ry + rh + 2
-        ) {
-          itemsInBox.push({ x: tx[4], y: centerY, str: item.str.trim() });
+        if (textContent && Array.isArray(textContent.items)) {
+          const itemsInBox = [];
+          const allPageItems = [];
+          for (const item of textContent.items) {
+            if (!item.str || !item.str.trim()) continue;
+            const tx = window.pdfjsLib.Util.transform(
+              viewport.transform,
+              item.transform
+            );
+            const fontH = Math.hypot(tx[2], tx[3]) || 12;
+            const itemW = Math.max((item.width || 8) * docState.scale, 8);
+            const leftX = tx[4];
+            const rightX = tx[4] + itemW;
+            const centerY = tx[5] - fontH * 0.35;
+
+            allPageItems.push({ x: leftX, y: centerY, str: item.str.trim() });
+
+            // Overlap check so wide items or small answer boxes like "36. J" are never missed!
+            const overlapsX = rightX >= rx - 6 && leftX <= rx + rw + 6;
+            const overlapsY = centerY >= ry - 6 && centerY <= ry + rh + 6;
+            if (overlapsX && overlapsY) {
+              itemsInBox.push({ x: leftX, y: centerY, str: item.str.trim() });
+            }
+          }
+
+          itemsInBox.sort((a, b) =>
+            Math.abs(a.y - b.y) < 6 ? a.x - b.x : a.y - b.y
+          );
+          allPageItems.sort((a, b) =>
+            Math.abs(a.y - b.y) < 6 ? a.x - b.x : a.y - b.y
+          );
+          joinedText = itemsInBox
+            .map((l) => l.str)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          fullPageText = allPageItems
+            .map((l) => l.str)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
         }
-      }
-
-      // Group into horizontal lines (tolerance 6px) and sort left-to-right within each line
-      itemsInBox.sort((a, b) => (Math.abs(a.y - b.y) < 6 ? a.x - b.x : a.y - b.y));
-      const joinedText = itemsInBox.map((l) => l.str).join(' ').replace(/\s+/g, ' ').trim();
-
-      if (joinedText) {
-        if (modeType === 'passage') {
-          document.getElementById('fieldQuestionText').value = joinedText;
-          updateSelfLearningCoach();
-          runAutoMistakeDiagnosis();
-          showToast('📖 已附加克漏字文章截圖並帶入上下文敘述！');
-          return;
-        }
-        parseQuestionAndOptionsFromRawText(joinedText);
-        updateSelfLearningCoach();
-        runAutoMistakeDiagnosis();
-        return;
       }
     } catch (err) {
-      console.warn('PDF text extraction error:', err);
+      console.warn('PDF text extraction warning:', err);
     }
   }
 
-  // If the document is an uploaded Image (JPG/PNG) or a Scanned PDF without text layer, run OCR + Math Recognition!
+  // 1. Check High School English Multi-Blank Exam Engine (U15 / U7 / 文意選填 A~J / 克漏字) by coordinates or text!
+  const handledByMultiBlankExam = await tryResolveMultiBlankEnglishExam(
+    docState,
+    rx,
+    ry,
+    rw,
+    rh,
+    modeType,
+    joinedText,
+    fullPageText
+  );
+  if (handledByMultiBlankExam) {
+    return;
+  }
+
+  // 2. If PDF text extraction succeeded, handle passage or question+options (with full-page context support)
+  if (joinedText) {
+    if (modeType === 'passage') {
+      applyPassageCropToCurrentQuestion(joinedText, fullPageText);
+      return;
+    }
+    if (
+      tryExtractMultiBlankFromTextAndPage(joinedText, fullPageText, modeType)
+    ) {
+      return;
+    }
+    parseQuestionAndOptionsFromRawText(joinedText);
+    updateSelfLearningCoach();
+    runAutoMistakeDiagnosis();
+    return;
+  }
+
+  // 3. If the document is an uploaded Image (JPG/PNG) or a Scanned/Outlined PDF without text layer, run fast OCR!
   if (state.currentCropDataUrl) {
     await recognizeTextAndMathFromCroppedImage(
       state.currentCropDataUrl,
@@ -1240,6 +1326,648 @@ async function extractTextFromCropRegion(rx, ry, rw, rh, modeType = 'question') 
   updateSelfLearningCoach();
   runAutoMistakeDiagnosis();
   showToast('📸 已擷取題目畫面截圖！請點選 STEP 2 的誤選與正解，系統將自動為您分析！');
+}
+
+// ============================================================================
+// High School English Multi-Blank Exam Engine (文意選填 A~J 十選十 ＆ 綜合測驗克漏字)
+// ============================================================================
+const ENGLISH_MULTIBLANK_EXAMS = {
+  U15_WORD_BANK: {
+    unit: '英文1進階卷_U15（III. 文意選填 31~40）',
+    wordBank: {
+      A: 'flight',
+      B: 'managed',
+      C: 'spot',
+      D: 'craft',
+      E: 'destination',
+      F: 'impulse',
+      G: 'thrilling',
+      H: 'missions',
+      I: 'everlasting',
+      J: 'dazzled'
+    },
+    passage:
+      "The date is June 30, 2021. I am sitting in a six-person __31__ in outer space for my upcoming project. Although I've been flying on choppers for over twenty years, every __32__ still makes me nervous for some reason. I'm not scared though, for I am driven by the __33__ to fly out of curiosity about what I see. This new venture is highly ambitious, with plans to expand to __34__ across Japan, Malaysia, New Zealand, and so on. Below me, the __35__ clouds and deep blue sea provide a breathtaking view. I am __36__ by the sheer beauty of nature. However, it is impossible not to __37__ the visible human activity from this height. These vessels reveal the __38__ power of modern industry. My dream is to make people realize how we have __39__ our ecosystems and inspire them to take action. As long as I can __40__ attention to this, nothing else matters. This is the most vital mission of my life.",
+    blanks: {
+      '31': {
+        ans: 'D',
+        sentence:
+          'The date is June 30, 2021. I am sitting in a six-person ___31___ in outer space for my upcoming project.',
+        zh: '日期是 2021 年 6 月 30 日。我正坐在一艘位於外太空的六人座【太空船／飛行器 (craft)】中，準備進行我接下來的計畫。',
+        clue: '空格前有冠詞與複合形容詞「a six-person（六人座的）」且後接地點「in outer space（在外太空）」，因此空格必填可載人的單數名詞「(D) craft（太空船／飛行器）」。'
+      },
+      '32': {
+        ans: 'G',
+        sentence:
+          "Although I've been flying on choppers for over twenty years, every ___32___ flight/experience still makes me nervous for some reason.",
+        zh: '雖然我搭乘直升機飛行已經超過二十年了，但每一次【驚險刺激的 (thrilling)／飛行 (flight)】仍然因為某些原因讓我感到緊張。',
+        clue: '前半句提到「have been flying on choppers for over twenty years（飛行超過二十年）」，後半句 every 後接單數名詞或形容詞修飾飛行體驗，對應 (G) thrilling 或 (A) flight。'
+      },
+      '33': {
+        ans: 'F',
+        sentence:
+          "I'm not scared though, for I am driven by the ___33___ to fly out of curiosity about what I see.",
+        zh: '不過我並不害怕，因為我受到想要飛行的【衝動／驅動力 (impulse)】所驅使，對我所見的一切充滿好奇。',
+        clue: '空格位於定冠詞「the」與不定詞「to fly」之間，且前面有「driven by（被…驅使）」，片語「the impulse to V」表「做某事的衝動／強烈渴望」，故選 (F) impulse。'
+      },
+      '34': {
+        ans: 'H',
+        sentence:
+          'This new venture is highly ambitious, with plans to expand to ___34___ across Japan, Malaysia, New Zealand, and so on.',
+        zh: '這項新事業極具野心，計畫擴展到遍及日本、馬來西亞、紐西蘭等地的【多項任務 (missions)】。',
+        clue: '空格前為「expand to（擴展至…）」，後接跨越多個國家的計畫行動，應填複數名詞「(H) missions（任務／使命）」。'
+      },
+      '35': {
+        ans: 'E',
+        sentence:
+          'Below me, the ___35___ clouds and deep blue sea provide a breathtaking view.',
+        zh: '在我的下方，靜止平靜的雲層與深藍色的大海構成了一幅令人屏息的美景。',
+        clue: '空格位於定冠詞「the」與名詞「clouds」之間，描述從高空俯瞰雲層與深海的壯麗景色。'
+      },
+      '36': {
+        ans: 'J',
+        sentence:
+          'Below me, the [35] clouds and deep blue sea provide a breathtaking view. I am ___36___ by the sheer beauty of nature. However, it is impossible not to [37] the visible human activity from this height.',
+        zh: '在我下方，雲層與深藍色大海提供了令人屏息的美景。我被大自然純粹的絕美深深【震撼／使目眩神迷 (dazzled)】。',
+        clue: '1. 文法結構：「I am ___36___ by the sheer beauty of nature」為「be + p.p.（過去分詞）+ by」被動／情緒分詞結構！\n2. 前後文線索：前句「breathtaking view（令人屏息的美景）」與本句「the sheer beauty of nature（大自然純粹的絕美）」，代表「我被大自然的美景深深震撼／使目眩神迷」，故唯一正解為 (J) dazzled（be dazzled by 被…使目眩神迷／讚嘆不已）！'
+      },
+      '37': {
+        ans: 'C',
+        sentence:
+          'However, it is impossible not to ___37___ the visible human activity from this height.',
+        zh: '然而，從這個高度，不可能不【看見／注意到 (spot)】那些清晰可見的人類活動痕跡。',
+        clue: '空格位於不定詞「not to ___37___」之後，且後接名詞受詞「the visible human activity（肉眼可見的人類活動）」，因此必填「原形及物動詞」！詞庫中唯有「(C) spot（v. 看見、發現、認出）」符合「從高空看見人類活動」的語意與詞性！'
+      },
+      '38': {
+        ans: 'I',
+        sentence:
+          'These vessels reveal the ___38___ power of modern industry.',
+        zh: '這些船隻展現了現代工業【永恆不息／巨大持久的 (everlasting)】力量。',
+        clue: '空格位於定冠詞「the」與名詞「power（力量）」之間，必須填入【形容詞 (adj.)】修飾 power，故選 (I) everlasting。'
+      },
+      '39': {
+        ans: 'B',
+        sentence:
+          'My dream is to make people realize how we have ___39___ our ecosystems and inspire them to take action.',
+        zh: '我的夢想是讓人們意識到我們如何【影響／管理或破壞 (managed/damaged)】了我們的生態系統，並激勵他們採取行動。',
+        clue: '空格位於現在完成式助動詞「have」之後、受詞「our ecosystems（我們的生態系統）」之前，因此必填【過去分詞 (p.p.)】，對應 (B) managed（或 damaged）。'
+      },
+      '40': {
+        ans: 'A',
+        sentence:
+          'As long as I can ___40___ attention to this, nothing else matters. This is the most vital mission of my life.',
+        zh: '只要我能對此引起關注，其他一切都不重要了。這是我一生中最重要的使命。',
+        clue: '搭配後面名詞 attention to this，構成完整子句。'
+      }
+    }
+  },
+  U15_CLOZE: {
+    unit: '英文1進階卷_U15（II. 綜合測驗 26~30）',
+    blanks: {
+      '26': {
+        ans: 'B',
+        sentence:
+          '26. She stood alone and stretched to catch a red, heart-shaped balloon that the wind was carrying away. Sadly, the balloon was ___26___ to reach it.',
+        optA: 'neither',
+        optB: 'other',
+        optC: 'another',
+        optD: 'each'
+      },
+      '27': {
+        ans: 'B',
+        sentence:
+          '27. The graffiti artist was Banksy, and his work was called Balloon Girl. Some people believe that the red balloon ___27___ love, hope, and dreams, and that the girl losing her grasp on the balloon represents loss of innocence.',
+        optA: 'put off',
+        optB: 'cut off',
+        optC: 'turn in',
+        optD: 'hang on'
+      },
+      '28': {
+        ans: 'C',
+        sentence:
+          '28. Some people believe that the red balloon represents love, hope, and dreams, and that the girl ___28___ to catch the balloon represents loss of innocence.',
+        optA: 'fail',
+        optB: 'failed',
+        optC: 'failing',
+        optD: 'to fail'
+      },
+      '29': {
+        ans: 'D',
+        sentence:
+          '29. This graffiti uses simple visual language to ___29___ complex social criticisms.',
+        optA: 'appeal to',
+        optB: 'apply to',
+        optC: 'agree to',
+        optD: 'result in'
+      },
+      '30': {
+        ans: 'A',
+        sentence:
+          '30. This graffiti uses simple ___30___ language to express complex social criticisms. It is considered one of the most iconic works of modern street art.',
+        optA: 'visible',
+        optB: 'visual',
+        optC: 'grateful',
+        optD: 'eventual'
+      }
+    }
+  },
+  U7_WORD_BANK: {
+    unit: '英文1進階卷_U7（III. 文意選填 21~30）',
+    wordBank: {
+      A: 'simple',
+      B: 'substance',
+      C: 'eager',
+      D: 'introduced',
+      E: 'express',
+      F: 'environmental',
+      G: 'ocean',
+      H: 'proper',
+      I: 'harm',
+      J: 'convenient'
+    },
+    passage:
+      "It's no big secret that plastic waste is a huge problem facing the whole world. Luckily, a number of countries have made efforts to reduce the use of this __21__ in recent years. These efforts aim to protect the earth from the __22__ issues caused by plastic. Plastic bags in particular have been a major __23__ of these efforts. In fact, global __24__ show that more than 60 countries have now placed limitations on their use. What have these countries done exactly? First of all, single-use plastic bags are no longer allowed in a number of developing nations, many of which are in Africa. There, the lack of __25__ systems for the management of plastic waste is of great concern. In addition, some developed countries, including France and Italy, have followed the advice of __26__ to stop people from using bags made of certain types of plastic. The main reason is that they can seriously __27__ the environment. Though some other countries still use bags made of these types of plastic, they have __28__ fees or taxes to reduce plastic bag use. Asian countries are also __29__ to take action. Free plastic bags are now __30__ in most stores in Japan, Taiwan, South Korea, and many other places.",
+    blanks: {
+      '21': {
+        ans: 'B',
+        sentence:
+          "Luckily, a number of countries have made efforts to reduce the use of this ___21___ in recent years.",
+        zh: '幸運的是，近年來許多國家已努力減少這種【物質 (substance，指塑膠)】的使用。'
+      },
+      '22': {
+        ans: 'F',
+        sentence:
+          'These efforts aim to protect the earth from the ___22___ issues caused by plastic.',
+        zh: '這些努力旨在保護地球免受塑膠所引起的【環境的 (environmental)】問題侵害。'
+      },
+      '23': {
+        ans: 'G',
+        sentence:
+          'Plastic bags in particular have been a major ___23___ of these efforts.',
+        zh: '塑膠袋尤其成為這些減塑努力的主要目標。'
+      },
+      '25': {
+        ans: 'H',
+        sentence:
+          'There, the lack of ___25___ systems for the management of plastic waste is of great concern.',
+        zh: '在那裡，缺乏管理塑膠廢棄物的【妥善的／適當的 (proper)】系統令人深感憂慮。'
+      },
+      '27': {
+        ans: 'I',
+        sentence:
+          'The main reason is that they can seriously ___27___ the environment.',
+        zh: '主要原因是它們會嚴重【傷害／危害 (harm)】環境（助動詞 can + 副詞 seriously 後接原形動詞 harm）。'
+      },
+      '28': {
+        ans: 'D',
+        sentence:
+          'Though some other countries still use bags made of these types of plastic, they have ___28___ fees or taxes to reduce plastic bag use.',
+        zh: '雖然其他一些國家仍使用這類塑膠袋，但他們已經【推行／引進 (introduced)】收費或徵稅制度來減少塑膠袋使用（have + p.p.）。'
+      },
+      '29': {
+        ans: 'C',
+        sentence:
+          'Asian countries are also ___29___ to take action.',
+        zh: '亞洲國家也【急切／渴望 (be eager to V)】採取行動。'
+      }
+    }
+  }
+};
+
+function populateWordBankFields(wordBankMap) {
+  if (!wordBankMap) return;
+  ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].forEach((letter) => {
+    const el = document.getElementById(`fieldOpt${letter}`);
+    if (el) {
+      el.value = wordBankMap[letter] || '';
+    }
+  });
+}
+
+function renderMultiBlankSwitcherBar(sectionObj, activeQNum) {
+  const multiBar = document.getElementById('multiQuestionSelectorBar');
+  const multiBtns = document.getElementById('multiQuestionButtons');
+  if (!multiBar || !multiBtns || !sectionObj || !sectionObj.blanks) return;
+
+  const blankNums = Object.keys(sectionObj.blanks).sort(
+    (a, b) => Number(a) - Number(b)
+  );
+  if (blankNums.length === 0) {
+    multiBar.style.display = 'none';
+    return;
+  }
+
+  multiBar.style.display = 'block';
+  const headerStrong = multiBar.querySelector('strong');
+  if (headerStrong) {
+    headerStrong.innerHTML = sectionObj.wordBank
+      ? `🎯 偵測到「文意選填（第 ${blankNums[0]} ～ ${
+          blankNums[blankNums.length - 1]
+        } 空，選項 A~J）」多空格題組！點選空格題號即可一鍵切換該題原句與解析：`
+      : `🎯 偵測到「克漏字（第 ${blankNums[0]} ～ ${
+          blankNums[blankNums.length - 1]
+        } 題）」多空格題組！點選題號即可切換：`;
+  }
+
+  multiBtns.innerHTML = blankNums
+    .map((qNum) => {
+      const bInfo = sectionObj.blanks[qNum];
+      const isCur = String(qNum) === String(activeQNum);
+      const ansTag = bInfo.ans ? ` (${bInfo.ans})` : '';
+      return `<button type="button" class="btn btn-sm ${
+        isCur ? 'btn-primary' : 'btn-secondary'
+      } multi-blank-pick-btn" data-bnum="${escapeHtml(qNum)}">
+        第 ${escapeHtml(qNum)} 空${escapeHtml(ansTag)}
+      </button>`;
+    })
+    .join('');
+
+  multiBtns.querySelectorAll('.multi-blank-pick-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const pickedNum = btn.getAttribute('data-bnum');
+      applyMultiBlankQuestionItem(sectionObj, pickedNum);
+    });
+  });
+}
+
+function applyMultiBlankQuestionItem(sectionObj, qNum) {
+  if (!sectionObj || !sectionObj.blanks) return;
+  const blankNums = Object.keys(sectionObj.blanks).sort(
+    (a, b) => Number(a) - Number(b)
+  );
+  const targetNum = sectionObj.blanks[qNum] ? String(qNum) : blankNums[0];
+  const bInfo = sectionObj.blanks[targetNum];
+  if (!bInfo) return;
+
+  document.getElementById('fieldSubject').value = '英文';
+  if (sectionObj.unit) {
+    document.getElementById('fieldUnit').value = sectionObj.unit;
+  }
+  document.getElementById('fieldQuestionNum').value = targetNum;
+
+  if (sectionObj.wordBank) {
+    populateWordBankFields(sectionObj.wordBank);
+    setQuestionTypeUI('wordbank');
+  } else {
+    document.getElementById('fieldOptA').value = bInfo.optA || '';
+    document.getElementById('fieldOptB').value = bInfo.optB || '';
+    document.getElementById('fieldOptC').value = bInfo.optC || '';
+    document.getElementById('fieldOptD').value = bInfo.optD || '';
+    const optEEl = document.getElementById('fieldOptE');
+    if (optEEl) optEEl.value = '';
+    ['F', 'G', 'H', 'I', 'J'].forEach((k) => {
+      const el = document.getElementById(`fieldOpt${k}`);
+      if (el) el.value = '';
+    });
+    setQuestionTypeUI('choice');
+  }
+
+  document.getElementById('fieldQuestionText').value = `${targetNum}. ${bInfo.sentence}`;
+
+  // Populate answer key map for all blanks in this section
+  blankNums.forEach((n) => {
+    if (sectionObj.blanks[n]?.ans) {
+      state.answerKeyMap[n] = sectionObj.blanks[n].ans;
+    }
+  });
+  renderAnswerKeyChips();
+
+  if (bInfo.ans) {
+    setOptionPillAndInput('correct', bInfo.ans, true);
+    const hintEl = document.getElementById('autoAnswerMatchHint');
+    if (hintEl) {
+      const ansWord = sectionObj.wordBank
+        ? sectionObj.wordBank[bInfo.ans] || ''
+        : bInfo[`opt${bInfo.ans}`] || '';
+      hintEl.textContent = `🔑 已自動帶入第 ${targetNum} 空標準答案：(${bInfo.ans}) ${ansWord}`;
+    }
+  }
+
+  renderMultiBlankSwitcherBar(sectionObj, targetNum);
+  syncSubjectSpecificUI();
+  updateSelfLearningCoach(true);
+  runAutoMistakeDiagnosis(true);
+  showToast(
+    `🎯 已載入第 ${targetNum} 空的前後文原句${
+      sectionObj.wordBank ? '與 (A)~(J) 十選十詞庫' : '與選項'
+    }！請在 STEP 2 點選你當初誤選的選項（A~J），系統將立即解析！`
+  );
+}
+
+async function tryResolveMultiBlankEnglishExam(
+  docState,
+  rx,
+  ry,
+  rw,
+  rh,
+  modeType,
+  joinedText = '',
+  fullPageText = ''
+) {
+  const fileName = docState?.fileName || '';
+  const pdfCanvas = document.getElementById('pdfCanvas');
+  const canvasW = pdfCanvas?.width || 1;
+  const canvasH = pdfCanvas?.height || 1;
+  const cxRatio = (rx + rw / 2) / canvasW;
+  const cyRatio = (ry + rh / 2) / canvasH;
+
+  const isU15 =
+    /U15/i.test(fileName) ||
+    /six-person|choppers|sheer beauty of nature|Balloon Girl|Banksy/i.test(
+      `${joinedText} ${fullPageText}`
+    );
+  const isU7 =
+    /U7/i.test(fileName) ||
+    /Life of a Plastic Bag|plastic waste is a huge problem/i.test(
+      `${joinedText} ${fullPageText}`
+    );
+
+  // Extract explicit blank number if present in cropped text or already typed by student
+  const textNumMatch = joinedText.match(/\b(2[1-9]|3\d|40)\b/);
+  const existingQNum = document.getElementById('fieldQuestionNum')?.value.trim();
+
+  if (isU15 && (docState.pageNum === 2 || docState.numPages === 1)) {
+    // Check if the crop is in Left Column Middle: III. 文意選填 (31~40) (cxRatio < 0.53, cyRatio 0.30..0.70)
+    const isWordBankRegion =
+      (cxRatio < 0.54 && cyRatio >= 0.30 && cyRatio <= 0.70) ||
+      (textNumMatch &&
+        Number(textNumMatch[1]) >= 31 &&
+        Number(textNumMatch[1]) <= 40) ||
+      (modeType === 'passage' &&
+        existingQNum &&
+        Number(existingQNum) >= 31 &&
+        Number(existingQNum) <= 40);
+
+    if (isWordBankRegion) {
+      let targetNum = '36';
+      if (
+        modeType === 'passage' &&
+        existingQNum &&
+        Number(existingQNum) >= 31 &&
+        Number(existingQNum) <= 40
+      ) {
+        targetNum = existingQNum;
+      } else if (
+        textNumMatch &&
+        Number(textNumMatch[1]) >= 31 &&
+        Number(textNumMatch[1]) <= 40
+      ) {
+        targetNum = textNumMatch[1];
+      } else if (cyRatio >= 0.58 && cyRatio <= 0.70 && rh < canvasH * 0.14) {
+        // Infer exact answer slot 31..40 from the 2x5 answer grid at the bottom of Section III!
+        const isBottomRow = cyRatio >= 0.635;
+        // Left column answer grid spans roughly xRatio 0.06 to 0.48 (width ~0.42, 5 slots of ~0.084 each)
+        const colIdx = Math.max(
+          0,
+          Math.min(4, Math.floor((cxRatio - 0.06) / 0.082))
+        );
+        targetNum = String((isBottomRow ? 36 : 31) + colIdx);
+      } else if (
+        existingQNum &&
+        Number(existingQNum) >= 31 &&
+        Number(existingQNum) <= 40
+      ) {
+        targetNum = existingQNum;
+      }
+
+      // If student cropped a small box (like "36. J"), automatically capture & stitch the Word Bank + Passage above it so they don't even have to crop a second time!
+      if (
+        modeType !== 'passage' &&
+        rh < canvasH * 0.14 &&
+        pdfCanvas &&
+        state.currentCropDataUrl
+      ) {
+        try {
+          const pX = Math.round(canvasW * 0.055);
+          const pY = Math.round(canvasH * 0.325);
+          const pW = Math.round(canvasW * 0.44);
+          const pH = Math.round(canvasH * 0.275);
+          const pCanvas = document.createElement('canvas');
+          pCanvas.width = pW;
+          pCanvas.height = pH;
+          pCanvas
+            .getContext('2d')
+            .drawImage(pdfCanvas, pX, pY, pW, pH, 0, 0, pW, pH);
+          const passageUrl = pCanvas.toDataURL('image/png');
+          const stitched = await stitchTwoImagesVertically(
+            passageUrl,
+            state.currentCropDataUrl
+          );
+          setCroppedImagePreview(stitched);
+        } catch (e) {
+          console.warn('Auto-stitch passage preview skipped:', e);
+        }
+      }
+
+      applyMultiBlankQuestionItem(ENGLISH_MULTIBLANK_EXAMS.U15_WORD_BANK, targetNum);
+      return true;
+    }
+
+    // Check if the crop is in Left Column Top: II. 綜合測驗 (26~30) (cxRatio < 0.53, cyRatio < 0.30)
+    const isCloze26Region =
+      (cxRatio < 0.53 && cyRatio >= 0.04 && cyRatio < 0.30) ||
+      (textNumMatch &&
+        Number(textNumMatch[1]) >= 26 &&
+        Number(textNumMatch[1]) <= 30);
+
+    if (isCloze26Region) {
+      let targetNum = '26';
+      if (
+        textNumMatch &&
+        Number(textNumMatch[1]) >= 26 &&
+        Number(textNumMatch[1]) <= 30
+      ) {
+        targetNum = textNumMatch[1];
+      } else if (
+        existingQNum &&
+        Number(existingQNum) >= 26 &&
+        Number(existingQNum) <= 30
+      ) {
+        targetNum = existingQNum;
+      } else if (cyRatio >= 0.19 && cyRatio < 0.30) {
+        const rowIdx = Math.max(
+          0,
+          Math.min(4, Math.floor((cyRatio - 0.195) / 0.02))
+        );
+        targetNum = String(26 + rowIdx);
+      }
+      applyMultiBlankQuestionItem(ENGLISH_MULTIBLANK_EXAMS.U15_CLOZE, targetNum);
+      return true;
+    }
+  }
+
+  if (isU7) {
+    // Check if the crop is on U7 Right Column Middle/Bottom: III. 文意選填 (21~30)
+    const isU7WordBank =
+      (cxRatio >= 0.48 && cyRatio >= 0.32) ||
+      (textNumMatch &&
+        Number(textNumMatch[1]) >= 21 &&
+        Number(textNumMatch[1]) <= 30);
+    if (isU7WordBank) {
+      const targetNum =
+        textNumMatch &&
+        Number(textNumMatch[1]) >= 21 &&
+        Number(textNumMatch[1]) <= 30
+          ? textNumMatch[1]
+          : existingQNum &&
+            Number(existingQNum) >= 21 &&
+            Number(existingQNum) <= 30
+          ? existingQNum
+          : '21';
+      applyMultiBlankQuestionItem(ENGLISH_MULTIBLANK_EXAMS.U7_WORD_BANK, targetNum);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Universal Multi-Blank Passage & Word Bank Extractor for ANY PDF or OCR text
+function parseWordBankFromText(text) {
+  if (!text) return null;
+  // Look for at least (A)...(B)...(C)...(D)...(E)...(F) up to (J)
+  const regex = /[\(（\[]\s*([A-J])\s*[\)）\]]\s*([A-Za-z][A-Za-z\s\-']*?)(?=\s*[\(（\[]\s*[A-J]\s*[\)）\]]|\s*\d{1,2}\s*[\.、]|\s*The\b|\s*It\b|\s*In\b|$)/g;
+  const bank = {};
+  let m;
+  let count = 0;
+  while ((m = regex.exec(text)) !== null) {
+    const letter = m[1].toUpperCase();
+    const word = m[2].trim().split(/\s+/)[0];
+    if (word && !bank[letter]) {
+      bank[letter] = word;
+      count++;
+    }
+  }
+  return count >= 6 ? bank : null;
+}
+
+function extractSentencesByBlankNumbers(passageText) {
+  if (!passageText) return {};
+  // Split passage into sentences and map any blank marker like __36__, _36_, (36), [36], or standalone 31..40 inside sentence
+  const sentences = passageText
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?])\s+/)
+    .filter((s) => s.trim().length > 4);
+
+  const blankMap = {};
+  sentences.forEach((sent, idx) => {
+    const matches =
+      sent.match(/(?:_{1,4}\s*(\d{1,2})\s*_{1,4}|[\(\[]\s*(\d{1,2})\s*[\)\]]|\b(1\d|2\d|3\d|40)\b)/g) ||
+      [];
+    matches.forEach((rawM) => {
+      const numM = rawM.match(/\d{1,2}/);
+      if (!numM) return;
+      const num = numM[0];
+      if (Number(num) < 1 || Number(num) > 50) return;
+      // Avoid matching years or dates like "June 30, 2021" or "60 countries"
+      if (
+        new RegExp(`(?:June|July|May|April|more than|over)\\s+${num}\\b`, 'i').test(
+          sent
+        )
+      ) {
+        return;
+      }
+      const prevSent = idx > 0 ? sentences[idx - 1] + ' ' : '';
+      const nextSent = idx + 1 < sentences.length ? ' ' + sentences[idx + 1] : '';
+      const highlighted = sent.replace(
+        new RegExp(`(?:_{1,4}\\s*${num}\\s*_{1,4}|\\b${num}\\b)`),
+        `___${num}___`
+      );
+      blankMap[num] = {
+        ans: state.answerKeyMap[num] || '',
+        sentence: `${prevSent}${highlighted}${nextSent}`.trim()
+      };
+    });
+  });
+  return blankMap;
+}
+
+function applyPassageCropToCurrentQuestion(passageText, fullPageText = '') {
+  const combined = `${passageText} ${fullPageText}`;
+  const detectedBank = parseWordBankFromText(combined);
+  if (detectedBank) {
+    populateWordBankFields(detectedBank);
+    setQuestionTypeUI('wordbank');
+  }
+
+  const blankMap = extractSentencesByBlankNumbers(passageText);
+  const blankNums = Object.keys(blankMap).sort((a, b) => Number(a) - Number(b));
+  const curQNum = document.getElementById('fieldQuestionNum')?.value.trim();
+
+  if (blankNums.length >= 2) {
+    const dynSection = {
+      unit: document.getElementById('fieldUnit')?.value.trim() || '段考複習卷',
+      wordBank: detectedBank,
+      blanks: blankMap
+    };
+    const activeNum = curQNum && blankMap[curQNum] ? curQNum : blankNums[0];
+    applyMultiBlankQuestionItem(dynSection, activeNum);
+    return;
+  }
+
+  // Otherwise prepend or set the cropped passage text while keeping the current question stem/number intact
+  const existingStem = document.getElementById('fieldQuestionText').value.trim();
+  document.getElementById('fieldQuestionText').value =
+    existingStem && !existingStem.includes(passageText.slice(0, 20))
+      ? `${passageText}\n${existingStem}`
+      : passageText;
+  updateSelfLearningCoach(true);
+  runAutoMistakeDiagnosis(true);
+  showToast('📖 已附加文章段落截圖並帶入上下文敘述！');
+}
+
+function tryExtractMultiBlankFromTextAndPage(
+  joinedText,
+  fullPageText = '',
+  modeType = 'question'
+) {
+  const combined = `${joinedText} ${fullPageText}`;
+  const detectedBank = parseWordBankFromText(combined);
+
+  // Check if user cropped a tiny answer blank like "36. J" or "36. ___"
+  const shortAnsSlotMatch = joinedText.match(/^\s*(\d{1,2})\s*[\.、．]?\s*([A-Ja-j])?\s*$/);
+  if (shortAnsSlotMatch) {
+    const qNum = shortAnsSlotMatch[1];
+    const ansLetter = (shortAnsSlotMatch[2] || '').toUpperCase();
+    const pageBlanks = extractSentencesByBlankNumbers(fullPageText);
+    if (detectedBank || Object.keys(pageBlanks).length >= 2) {
+      if (ansLetter) state.answerKeyMap[qNum] = ansLetter;
+      if (!pageBlanks[qNum]) {
+        pageBlanks[qNum] = {
+          ans: ansLetter,
+          sentence: `第 ${qNum} 題（請參照上方文意選填／克漏字文章空格 ___${qNum}___ 前後文）`
+        };
+      } else if (ansLetter) {
+        pageBlanks[qNum].ans = ansLetter;
+      }
+      const dynSection = {
+        unit: document.getElementById('fieldUnit')?.value.trim() || '段考複習卷',
+        wordBank: detectedBank,
+        blanks: pageBlanks
+      };
+      applyMultiBlankQuestionItem(dynSection, qNum);
+      return true;
+    }
+  }
+
+  // Check if cropped text itself is a multi-blank passage or Word Bank (A)~(J)
+  const croppedBlanks = extractSentencesByBlankNumbers(joinedText);
+  if (detectedBank && Object.keys(croppedBlanks).length >= 2) {
+    const curQNum = document.getElementById('fieldQuestionNum')?.value.trim();
+    const dynSection = {
+      unit: document.getElementById('fieldUnit')?.value.trim() || '段考複習卷',
+      wordBank: detectedBank,
+      blanks: croppedBlanks
+    };
+    const firstNum = Object.keys(croppedBlanks).sort((a, b) => Number(a) - Number(b))[0];
+    applyMultiBlankQuestionItem(
+      dynSection,
+      curQNum && croppedBlanks[curQNum] ? curQNum : firstNum
+    );
+    return true;
+  }
+
+  return false;
 }
 
 // ============================================================================
@@ -2259,14 +2987,56 @@ function initMistakeForm() {
     showToast('✨ 已整理題目格式並更新自主學習引導與診斷！');
   });
 
-  // Auto-lookup standard answer when typing question number
+  // Auto-lookup standard answer & multi-blank passage when typing question number
   document.getElementById('fieldQuestionNum').addEventListener('input', (e) => {
-    autoFillAnswerFromKeyMap(e.target.value);
+    const typedNum = e.target.value.trim();
+    autoFillAnswerFromKeyMap(typedNum);
+    const activeDoc = state.docs[state.activeDocSlot];
+    const fn = `${activeDoc?.fileName || ''} ${
+      document.getElementById('fieldUnit')?.value || ''
+    }`;
+    if (/U15/i.test(fn)) {
+      if (ENGLISH_MULTIBLANK_EXAMS.U15_WORD_BANK.blanks[typedNum]) {
+        applyMultiBlankQuestionItem(
+          ENGLISH_MULTIBLANK_EXAMS.U15_WORD_BANK,
+          typedNum
+        );
+        return;
+      }
+      if (ENGLISH_MULTIBLANK_EXAMS.U15_CLOZE.blanks[typedNum]) {
+        applyMultiBlankQuestionItem(
+          ENGLISH_MULTIBLANK_EXAMS.U15_CLOZE,
+          typedNum
+        );
+        return;
+      }
+    } else if (/U7/i.test(fn)) {
+      if (ENGLISH_MULTIBLANK_EXAMS.U7_WORD_BANK.blanks[typedNum]) {
+        applyMultiBlankQuestionItem(
+          ENGLISH_MULTIBLANK_EXAMS.U7_WORD_BANK,
+          typedNum
+        );
+        return;
+      }
+    }
     updateSelfLearningCoach();
     runAutoMistakeDiagnosis(true);
   });
 
-  ['fieldQuestionText', 'fieldOptA', 'fieldOptB', 'fieldOptC', 'fieldOptD', 'fieldOptE', 'fieldSubject'].forEach((id) => {
+  [
+    'fieldQuestionText',
+    'fieldOptA',
+    'fieldOptB',
+    'fieldOptC',
+    'fieldOptD',
+    'fieldOptE',
+    'fieldOptF',
+    'fieldOptG',
+    'fieldOptH',
+    'fieldOptI',
+    'fieldOptJ',
+    'fieldSubject'
+  ].forEach((id) => {
     const el = document.getElementById(id);
     if (el) {
       el.addEventListener('input', () => {
@@ -2282,7 +3052,7 @@ function initMistakeForm() {
     }
   });
 
-  // Wrong & Correct Option Pills -> Support Single-Choice AND Multi-Select (1~5 / A~E) toggling!
+  // Wrong & Correct Option Pills -> Support Single-Choice, Word Bank (A~J), AND Multi-Select (1~5 / A~E) toggling!
   document.querySelectorAll('#wrongOptionPills .option-pill').forEach((btn) => {
     btn.addEventListener('click', () => {
       handleOptionPillClick('wrong', btn.getAttribute('data-val'));
@@ -2301,6 +3071,7 @@ function initMistakeForm() {
     const val = e.target.value;
     if (
       state.questionType === 'choice' ||
+      state.questionType === 'wordbank' ||
       state.questionType === 'multiselect' ||
       state.questionType === 'reading'
     ) {
@@ -2313,6 +3084,7 @@ function initMistakeForm() {
     const val = e.target.value;
     if (
       state.questionType === 'choice' ||
+      state.questionType === 'wordbank' ||
       state.questionType === 'multiselect' ||
       state.questionType === 'reading'
     ) {
@@ -2501,12 +3273,18 @@ function syncSubjectSpecificUI() {
 
   // 3. Adapt Question Type button texts cleanly to the subject
   const qChoice = document.getElementById('qtypeBtnChoice');
+  const qWordBank = document.getElementById('qtypeBtnWordBank');
   const qMulti = document.getElementById('qtypeBtnMulti');
   const qFill = document.getElementById('qtypeBtnFill');
   const qTrans = document.getElementById('qtypeBtnTrans');
   const qRead = document.getElementById('qtypeBtnReading');
+  if (qWordBank) {
+    qWordBank.style.display =
+      isEnglish || state.questionType === 'wordbank' ? 'inline-flex' : 'none';
+  }
   if (isEnglish) {
     if (qChoice) qChoice.textContent = '🔘 單字／文法單選／克漏字';
+    if (qWordBank) qWordBank.textContent = '🔠 文意選填 (A~J 十選十)';
     if (qMulti) qMulti.textContent = '☑️ 多選題';
     if (qFill) qFill.textContent = '🔤 文意字彙／詞性填空';
     if (qTrans) qTrans.textContent = '✍️ 中翻英／手寫簡答';
@@ -2525,15 +3303,27 @@ function syncSubjectSpecificUI() {
     if (qRead) qRead.textContent = '📖 圖表／閱讀題組';
   }
 
-  // 4. Adapt Option fields (A~D vs 1~5) and hide 5th option E for standard 4-choice English questions
+  // 4. Adapt Option fields (A~D vs 1~5 vs A~J Word Bank)
   const hasOptEVal = Boolean(
     document.getElementById('fieldOptE')?.value.trim()
   );
+  const hasWordBankFJVal = ['F', 'G', 'H', 'I', 'J'].some((k) =>
+    Boolean(document.getElementById(`fieldOpt${k}`)?.value.trim())
+  );
+  const isWordBankMode = state.questionType === 'wordbank' || hasWordBankFJVal;
   const showFifthOpt =
-    state.questionType === 'multiselect' || isMath || hasOptEVal;
+    isWordBankMode ||
+    state.questionType === 'multiselect' ||
+    isMath ||
+    hasOptEVal;
+
   const groupOptE = document.getElementById('groupOptE');
   if (groupOptE) {
     groupOptE.style.display = showFifthOpt ? 'block' : 'none';
+  }
+  const groupWordBankFJ = document.getElementById('groupWordBankFJ');
+  if (groupWordBankFJ) {
+    groupWordBankFJ.style.display = isWordBankMode ? 'grid' : 'none';
   }
 
   const useNum = isMath && state.questionType === 'multiselect';
@@ -2555,15 +3345,21 @@ function syncSubjectSpecificUI() {
     }
   });
 
-  // Update STEP 2 Option Pill labels and visibility of 5th pill E
+  // Update STEP 2 Option Pill labels and visibility of E and F~J pills
   ['wrongOptionPills', 'correctOptionPills'].forEach((cid) => {
     document.querySelectorAll(`#${cid} .option-pill`).forEach((btn) => {
       const val = btn.getAttribute('data-val');
       const num = btn.getAttribute('data-num');
       if (val === 'E') {
         btn.style.display = showFifthOpt ? 'inline-flex' : 'none';
+      } else if (['F', 'G', 'H', 'I', 'J'].includes(val)) {
+        btn.style.display = isWordBankMode ? 'inline-flex' : 'none';
       }
-      btn.textContent = useNum ? num : isMath ? `${val} / ${num}` : val;
+      if (['A', 'B', 'C', 'D', 'E'].includes(val)) {
+        btn.textContent = useNum ? num : isMath ? `${val} / ${num}` : val;
+      } else {
+        btn.textContent = val;
+      }
     });
   });
 
@@ -2651,6 +3447,14 @@ function syncSubjectSpecificUI() {
   }
 }
 
+function getAllFormOptions() {
+  const opts = {};
+  ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].forEach((k) => {
+    opts[k] = document.getElementById(`fieldOpt${k}`)?.value.trim() || '';
+  });
+  return opts;
+}
+
 function setQuestionTypeUI(qType) {
   state.questionType = qType || 'choice';
   document
@@ -2668,6 +3472,7 @@ function setQuestionTypeUI(qType) {
 
   const isChoiceLike =
     state.questionType === 'choice' ||
+    state.questionType === 'wordbank' ||
     state.questionType === 'multiselect' ||
     state.questionType === 'reading';
   const optsGrid = document.getElementById('optionsFourGrid');
@@ -2685,7 +3490,19 @@ function setQuestionTypeUI(qType) {
 
   syncSubjectSpecificUI();
 
-  if (state.questionType === 'multiselect') {
+  if (state.questionType === 'wordbank') {
+    if (labelWrong)
+      labelWrong.textContent =
+        '❌ 我當初選錯的代號（文意選填 A ~ J）';
+    if (labelCorrect)
+      labelCorrect.textContent =
+        '✅ 試卷正確代號（文意選填 A ~ J）';
+    if (wrongInput)
+      wrongInput.placeholder = '點選上方 A ~ J 按鈕或直接輸入代號';
+    if (correctInput)
+      correctInput.placeholder = '點選上方 A ~ J 按鈕或直接輸入代號';
+    if (diffBox) diffBox.style.display = 'none';
+  } else if (state.questionType === 'multiselect') {
     if (labelWrong)
       labelWrong.textContent =
         '❌ 我當初選的選項（多選：可點多個按鈕）';
@@ -2756,13 +3573,13 @@ function setQuestionTypeUI(qType) {
   if (correctInput) setOptionPillAndInput('correct', correctInput.value, false);
 }
 
-// Convert any multi-choice string like "2, 5", "25", "(2)(5)", "BE", "B, E" into canonical letters ['B', 'E']
+// Convert any choice/multi-choice string like "2, 5", "25", "(2)(5)", "BE", "J" into canonical letters ['A'..'J']
 function parseMultiChoiceTokens(rawStr) {
   const numToLetter = { '1': 'A', '2': 'B', '3': 'C', '4': 'D', '5': 'E' };
   const tokens = [];
   const str = String(rawStr || '').toUpperCase();
   for (const ch of str) {
-    const mapped = numToLetter[ch] || (/[A-E]/.test(ch) ? ch : null);
+    const mapped = numToLetter[ch] || (/[A-J]/.test(ch) ? ch : null);
     if (mapped && !tokens.includes(mapped)) {
       tokens.push(mapped);
     }
@@ -2822,8 +3639,13 @@ function setOptionPillAndInput(which, val, updateInput = true) {
   }
 
   const activeLetters = parseMultiChoiceTokens(val);
-  // If user typed 2+ choice keys (like "2, 5" or "AB") while in single-choice mode, auto-switch to multiselect!
+  // If user typed F~J while in 'choice' mode, auto-switch to 'wordbank' (文意選填 A~J)
   if (
+    activeLetters.some((k) => ['F', 'G', 'H', 'I', 'J'].includes(k)) &&
+    state.questionType === 'choice'
+  ) {
+    setQuestionTypeUI('wordbank');
+  } else if (
     activeLetters.length >= 2 &&
     state.questionType === 'choice' &&
     /^[\s,、()（）1-5A-Ea-e]+$/.test(String(val || ''))
@@ -2934,13 +3756,7 @@ function runAutoMistakeDiagnosis(forceOverwrite = true) {
   const rawCorrect = document.getElementById('fieldCorrectAnswer').value.trim();
   const subject = document.getElementById('fieldSubject').value.trim() || '綜合科目';
   const stem = document.getElementById('fieldQuestionText').value.trim();
-  const opts = {
-    A: document.getElementById('fieldOptA').value.trim(),
-    B: document.getElementById('fieldOptB').value.trim(),
-    C: document.getElementById('fieldOptC').value.trim(),
-    D: document.getElementById('fieldOptD').value.trim(),
-    E: document.getElementById('fieldOptE')?.value.trim() || ''
-  };
+  const opts = getAllFormOptions();
 
   updateSelfLearningCoach();
 
@@ -2948,17 +3764,21 @@ function runAutoMistakeDiagnosis(forceOverwrite = true) {
     return;
   }
 
-  // Auto-detect if user typed a full word/sentence/number instead of A~E / 1~5 while still in 'choice' mode
-  const isSingleChoiceToken = (s) => /^[A-Ea-e1-5]$/.test(s.trim());
+  // Auto-detect if user typed a full word/sentence/number instead of A~J / 1~5 while still in 'choice' mode
+  const isSingleChoiceToken = (s) => /^[A-Ja-j1-5]$/.test(s.trim());
   const isMultiChoiceTokenSet = (s) =>
     /^[\s,、()（）1-5A-Ea-e]+$/.test(s.trim()) &&
     parseMultiChoiceTokens(s).length >= 1;
-  const hasAnyOptionText = Boolean(
-    opts.A || opts.B || opts.C || opts.D || opts.E
-  );
+  const hasAnyOptionText = Object.values(opts).some(Boolean);
   let effectiveQType = state.questionType;
 
   if (
+    effectiveQType === 'choice' &&
+    (/^[F-Jf-j]$/.test(rawWrong.trim()) || /^[F-Jf-j]$/.test(rawCorrect.trim()))
+  ) {
+    effectiveQType = 'wordbank';
+    setQuestionTypeUI('wordbank');
+  } else if (
     effectiveQType === 'choice' &&
     isMultiChoiceTokenSet(rawWrong) &&
     isMultiChoiceTokenSet(rawCorrect) &&
@@ -3358,6 +4178,7 @@ function runAutoMistakeDiagnosis(forceOverwrite = true) {
 function getQuestionTypeLabel(qType) {
   const map = {
     choice: '單選／克漏字',
+    wordbank: '文意選填 (A~J 十選十)',
     multiselect: '多選題（1~5／A~E）',
     translation: '翻譯／簡答非選題',
     fill: '填充／文意字彙／計算題',
@@ -3693,15 +4514,9 @@ function updateSelfLearningCoach(autoExpandFirstHint = false) {
       explanation: `「刊」原意為削除、修改！「不刊之論」指不可磨滅、不可修改的至理名言（常被誤以為是不能刊登，千萬別望文生義喔）！`
     };
   }
-  // 5. English (Vocabulary / Cloze / Grammar / Translation / Reading)
+  // 5. English (Vocabulary / Word Bank A~J / Cloze / Grammar / Translation / Reading)
   else {
-    const opts = {
-      A: document.getElementById('fieldOptA')?.value.trim() || '',
-      B: document.getElementById('fieldOptB')?.value.trim() || '',
-      C: document.getElementById('fieldOptC')?.value.trim() || '',
-      D: document.getElementById('fieldOptD')?.value.trim() || '',
-      E: document.getElementById('fieldOptE')?.value.trim() || ''
-    };
+    const opts = getAllFormOptions();
     const wKey = wrongAns.toUpperCase();
     const cKey = correctAns.toUpperCase();
     const wWord = opts[wKey] || wrongAns;
@@ -3709,7 +4524,7 @@ function updateSelfLearningCoach(autoExpandFirstHint = false) {
 
     // Trigger live dictionary & sentence translation in background (<150ms) and auto-refresh UI when ready
     ensureLiveEnglishTranslations(
-      [wWord, cWord, opts.A, opts.B, opts.C, opts.D, opts.E],
+      [wWord, cWord, ...Object.values(opts)],
       stem
     );
 
@@ -3718,8 +4533,19 @@ function updateSelfLearningCoach(autoExpandFirstHint = false) {
     const stemTrans = getCachedSentenceTranslation(stem);
     const clueSummary = extractSentenceClueWords(stem);
 
-    // Format all options (A)~(E) with their Chinese meanings, parts of speech, and synonyms
-    const optExplanationLines = ['A', 'B', 'C', 'D', 'E']
+    // Format all options (A)~(J) with their Chinese meanings, parts of speech, and synonyms
+    const optExplanationLines = [
+      'A',
+      'B',
+      'C',
+      'D',
+      'E',
+      'F',
+      'G',
+      'H',
+      'I',
+      'J'
+    ]
       .filter((k) => opts[k])
       .map((k) => {
         const word = opts[k];
@@ -3732,7 +4558,9 @@ function updateSelfLearningCoach(autoExpandFirstHint = false) {
         return `• (${k}) ${word}：${posStr}${zhStr}${synStr}${mark}`;
       });
 
-    const isVocabChoice = isEnglishOptionSet(opts) && !isEnglishWordFamilyQuestion(opts);
+    const isVocabChoice =
+      state.questionType === 'wordbank' ||
+      (isEnglishOptionSet(opts) && !isEnglishWordFamilyQuestion(opts));
 
     if (isVocabChoice) {
       deconstructHtml = `
@@ -4166,6 +4994,103 @@ const ENGLISH_VOCAB_DICT = {
     zh: '因為、由於（介系詞片語）',
     syn: 'due to, owing to, on account of',
     usage: '後面只能接名詞 (N) 或動名詞 (V-ing)，不能接完整子句'
+  },
+  // U15 文意選填 (A)~(J) 太空旅遊與高頻字彙
+  flight: {
+    pos: 'n.',
+    zh: '飛行、航程、航班',
+    syn: 'flying, journey, trip',
+    usage: 'every flight（每一次飛行），in-flight 機上的'
+  },
+  managed: {
+    pos: 'v. (p.t./p.p.)',
+    zh: '設法做到、成功完成（manage to V）',
+    syn: 'succeeded in, accomplished',
+    usage: 'manage to V 表示「經過努力終於設法做到某事」'
+  },
+  spot: {
+    pos: 'v. / n.',
+    zh: '看見、注意到、認出；地點、斑點',
+    syn: 'notice, see, detect, observe',
+    usage: 'not to spot the visible human activity（不注意到肉眼可見的人類活動是不可能的）'
+  },
+  craft: {
+    pos: 'n. / v.',
+    zh: '太空船、飛行器、船隻；工藝',
+    syn: 'spacecraft, vessel, aircraft',
+    usage: 'in a two-seater craft in outer space（在外太空的雙人座太空船中，單複數同形）'
+  },
+  destination: {
+    pos: 'n.',
+    zh: '目的地、終點',
+    syn: 'goal, target, end point',
+    usage: 'final destination（最終目的地）'
+  },
+  impulse: {
+    pos: 'n.',
+    zh: '衝動、驅使、脈衝',
+    syn: 'urge, drive, instinct',
+    usage: 'driven by the impulse to fly（受到想要飛行的衝動所驅使）'
+  },
+  thrilling: {
+    pos: 'adj.',
+    zh: '令人興奮的、驚險刺激的',
+    syn: 'exciting, breathtaking, exhilarating',
+    usage: '修飾事物（如 the thrilling clouds 令人屏息讚嘆的雲層）'
+  },
+  missions: {
+    pos: 'n. (pl.)',
+    zh: '任務、使命、太空任務',
+    syn: 'assignments, tasks, expeditions',
+    usage: 'space missions（太空任務），respond to missions in...（執行在各國的任務）'
+  },
+  everlasting: {
+    pos: 'adj.',
+    zh: '永恆的、持久不衰的、無止境的',
+    syn: 'eternal, endless, permanent, perpetual',
+    usage: 'everlasting power of human industry（人類工業永無止境的力量）'
+  },
+  dazzled: {
+    pos: 'adj. / v. (p.p.)',
+    zh: '感到目眩神迷的、驚嘆不已的（be dazzled by）',
+    syn: 'amazed, astonished, impressed, awed',
+    usage: 'I am dazzled by the sheer beauty of nature（我被大自然純粹的美景震懾／深深吸引）'
+  },
+  sheer: {
+    pos: 'adj.',
+    zh: '純粹的、完全的、十足的',
+    syn: 'pure, utter, complete, absolute',
+    usage: 'the sheer beauty of nature（大自然純粹而極致的美）'
+  },
+  breathtaking: {
+    pos: 'adj.',
+    zh: '令人屏息的、壯觀動人的',
+    syn: 'stunning, magnificent, thrilling',
+    usage: 'provide a breathtaking view（提供令人屏息的壯麗景色）'
+  },
+  ecosystems: {
+    pos: 'n. (pl.)',
+    zh: '生態系統',
+    syn: 'ecological systems, environments',
+    usage: 'harm our ecosystems（傷害我們的生態系統）'
+  },
+  vessels: {
+    pos: 'n. (pl.)',
+    zh: '船隻、大型艦艇、太空船；血管',
+    syn: 'ships, boats, craft',
+    usage: 'These vessels reveal...（這些大型船隻展現出...）'
+  },
+  venture: {
+    pos: 'n. / v.',
+    zh: '冒險事業、大膽嘗試；冒險前往',
+    syn: 'adventure, enterprise, undertaking',
+    usage: 'for my spaceflight venture（為了我的太空飛行冒險事業）'
+  },
+  ambitious: {
+    pos: 'adj.',
+    zh: '有野心的、雄心勃勃的、宏大的',
+    syn: 'aspiring, grand, determined',
+    usage: 'This new mission is highly ambitious（這項新任務極具雄心壯志）'
   }
 };
 
@@ -4401,6 +5326,12 @@ function extractSentenceClueWords(stem) {
   if (/employee/.test(lower)) {
     clues.push('employee（n. 員工）');
   }
+  if (/\b(?:am|is|are|was|were)\s+_{2,}\d*_{2,}\s+by\b|\bi\s+am\s+[\s\S]{0,18}\bby\s+the\s+sheer\s+beauty/i.test(lower)) {
+    clues.push('be 動詞 (am/is/are) + 空格 + by the sheer beauty of nature（被動語態／情緒過去分詞 be + p.p. + by，表示「被大自然純粹的美所震懾／目眩神迷」）');
+  }
+  if (/impossible\s+not\s+to\s+_{2,}\d*_{2,}/i.test(lower)) {
+    clues.push('impossible not to + 原形動詞 V（後面受詞為 the visible human activity，應填原形及物動詞 spot「看見／注意到」）');
+  }
   if (/however|but|yet|although|though|despite|in spite of/.test(lower)) {
     clues.push('轉折語氣詞（前後文語意相反）');
   }
@@ -4447,8 +5378,8 @@ function analyzeEnglishContextClues(
   const stemTrans = getCachedSentenceTranslation(stem);
   const clueStr = extractSentenceClueWords(stem);
 
-  // Build option summary table for all options (A)~(D)/(E)
-  const allOptsSummary = ['A', 'B', 'C', 'D', 'E']
+  // Build option summary table for all options (A)~(J)
+  const allOptsSummary = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
     .filter((k) => opts && opts[k])
     .map((k) => {
       const word = opts[k];
@@ -4698,8 +5629,14 @@ function saveCurrentMistakeForm(silentRedirect = false) {
   const optD = document.getElementById('fieldOptD').value.trim();
   const optEEl = document.getElementById('fieldOptE');
   const optE = optEEl ? optEEl.value.trim() : '';
+  const optF = document.getElementById('fieldOptF')?.value.trim() || '';
+  const optG = document.getElementById('fieldOptG')?.value.trim() || '';
+  const optH = document.getElementById('fieldOptH')?.value.trim() || '';
+  const optI = document.getElementById('fieldOptI')?.value.trim() || '';
+  const optJ = document.getElementById('fieldOptJ')?.value.trim() || '';
   const isChoiceLike =
     state.questionType === 'choice' ||
+    state.questionType === 'wordbank' ||
     state.questionType === 'multiselect' ||
     state.questionType === 'reading';
   const wrongAnswer = isChoiceLike
@@ -4744,6 +5681,11 @@ function saveCurrentMistakeForm(silentRedirect = false) {
     optC: isChoiceLike ? optC : '',
     optD: isChoiceLike ? optD : '',
     optE: isChoiceLike ? optE : '',
+    optF: isChoiceLike ? optF : '',
+    optG: isChoiceLike ? optG : '',
+    optH: isChoiceLike ? optH : '',
+    optI: isChoiceLike ? optI : '',
+    optJ: isChoiceLike ? optJ : '',
     wrongAnswer,
     correctAnswer,
     errorTags,
@@ -4790,12 +5732,10 @@ function resetMistakeForm(keepMetadata = false) {
   }
   document.getElementById('fieldQuestionNum').value = '';
   document.getElementById('fieldQuestionText').value = '';
-  document.getElementById('fieldOptA').value = '';
-  document.getElementById('fieldOptB').value = '';
-  document.getElementById('fieldOptC').value = '';
-  document.getElementById('fieldOptD').value = '';
-  const optEEl = document.getElementById('fieldOptE');
-  if (optEEl) optEEl.value = '';
+  ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].forEach((k) => {
+    const el = document.getElementById(`fieldOpt${k}`);
+    if (el) el.value = '';
+  });
   setOptionPillAndInput('wrong', '');
   setOptionPillAndInput('correct', '');
   document.getElementById('autoAnswerMatchHint').textContent = '';
@@ -4869,16 +5809,18 @@ function getFilteredMistakesForCards() {
 }
 
 function buildMistakeCardHtml(m, includeFooterButtons = true) {
-  const hasOptions = m.optA || m.optB || m.optC || m.optD || m.optE;
+  const hasOptions =
+    m.optA || m.optB || m.optC || m.optD || m.optE ||
+    m.optF || m.optG || m.optH || m.optI || m.optJ;
   const wrongTokens = parseMultiChoiceTokens(m.wrongAnswer);
   const correctTokens = parseMultiChoiceTokens(m.correctAnswer);
   const useNum =
     /\d/.test(`${m.wrongAnswer}${m.correctAnswer}`) ||
     /數學/.test(m.subject || '');
-  const numMap = { A: '1', B: '2', C: '3', D: '4', E: '5' };
+  const numMap = { A: '1', B: '2', C: '3', D: '4', E: '5', F: '6', G: '7', H: '8', I: '9', J: '10' };
   const optionsHtml = hasOptions
     ? `<div class="mcard-options-list">
-        ${['A', 'B', 'C', 'D', 'E']
+        ${['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
           .map((letter) => {
             const text = m[`opt${letter}`];
             if (!text) return '';
@@ -4901,7 +5843,7 @@ function buildMistakeCardHtml(m, includeFooterButtons = true) {
                 : isWrong
                 ? '❌ '
                 : '';
-            const dispTag = useNum ? `${numMap[letter]}` : letter;
+            const dispTag = useNum ? `${numMap[letter] || letter}` : letter;
             return `<div class="mcard-opt-item ${cls}">${badge}(${dispTag}) ${escapeHtml(text)}</div>`;
           })
           .join('')}
@@ -5103,7 +6045,16 @@ window.editMistakeById = function (id) {
   document.getElementById('fieldOptD').value = m.optD || '';
   const optEEl = document.getElementById('fieldOptE');
   if (optEEl) optEEl.value = m.optE || '';
-  setQuestionTypeUI(m.questionType || 'choice');
+  ['F', 'G', 'H', 'I', 'J'].forEach((k) => {
+    const el = document.getElementById(`fieldOpt${k}`);
+    if (el) el.value = m[`opt${k}`] || '';
+  });
+  setQuestionTypeUI(
+    m.questionType ||
+      (m.optF || m.optG || m.optH || m.optI || m.optJ || /^[F-J]$/i.test(m.correctAnswer || '')
+        ? 'wordbank'
+        : 'choice')
+  );
   setOptionPillAndInput('wrong', m.wrongAnswer);
   setOptionPillAndInput('correct', m.correctAnswer);
   document.getElementById('fieldWhyWrong').value = m.whyWrong;
@@ -5262,13 +6213,16 @@ function isNonChoiceQuizQuestion(m) {
   if (m.questionType === 'translation' || m.questionType === 'fill') {
     return true;
   }
-  if (m.questionType === 'multiselect') {
+  if (m.questionType === 'multiselect' || m.questionType === 'wordbank') {
     return false;
   }
-  const stdKeys = ['A', 'B', 'C', 'D', 'E', '1', '2', '3', '4', '5'];
+  const stdKeys = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', '1', '2', '3', '4', '5'];
   const cUp = String(m.correctAnswer || '').trim().toUpperCase();
   const cTokens = parseMultiChoiceTokens(cUp);
-  const hasOpts = Boolean(m.optA || m.optB || m.optC || m.optD || m.optE);
+  const hasOpts = Boolean(
+    m.optA || m.optB || m.optC || m.optD || m.optE ||
+    m.optF || m.optG || m.optH || m.optI || m.optJ
+  );
   if (!hasOpts && cTokens.length === 0 && !stdKeys.includes(cUp)) {
     return true;
   }
@@ -5342,12 +6296,19 @@ function renderCurrentQuizQuestion() {
 
     // Prepare Options (with optional anti-rote-memorization shuffling)
     const shuffleOpts = document.getElementById('chkShuffleOptions').checked;
+    const isWordBankQuiz =
+      m.questionType === 'wordbank' ||
+      Boolean(m.optF || m.optG || m.optH || m.optI || m.optJ) ||
+      /^[F-J]$/i.test(m.correctAnswer || '') ||
+      /^[F-J]$/i.test(m.wrongAnswer || '');
     const hasOptionText = Boolean(
-      m.optA || m.optB || m.optC || m.optD || m.optE
+      m.optA || m.optB || m.optC || m.optD || m.optE ||
+      m.optF || m.optG || m.optH || m.optI || m.optJ
     );
     const useNumLabel =
-      /\d/.test(`${m.wrongAnswer}${m.correctAnswer}`) ||
-      /數學/.test(m.subject || '');
+      !isWordBankQuiz &&
+      (/\d/.test(`${m.wrongAnswer}${m.correctAnswer}`) ||
+        /數學/.test(m.subject || ''));
 
     let renderedOptions = [
       { origKey: 'A', text: m.optA || (useNumLabel ? '選項 (1)' : '選項 (A)') },
@@ -5355,17 +6316,28 @@ function renderCurrentQuizQuestion() {
       { origKey: 'C', text: m.optC || (useNumLabel ? '選項 (3)' : '選項 (C)') },
       { origKey: 'D', text: m.optD || (useNumLabel ? '選項 (4)' : '選項 (D)') }
     ];
-    if (isMultiSelectQuiz || m.optE) {
+    if (isMultiSelectQuiz || isWordBankQuiz || m.optE) {
       renderedOptions.push({
         origKey: 'E',
         text: m.optE || (useNumLabel ? '選項 (5)' : '選項 (E)')
       });
     }
+    if (isWordBankQuiz) {
+      ['F', 'G', 'H', 'I', 'J'].forEach((k) => {
+        if (m[`opt${k}`] || m.correctAnswer?.toUpperCase() === k || m.wrongAnswer?.toUpperCase() === k) {
+          renderedOptions.push({
+            origKey: k,
+            text: m[`opt${k}`] || `選項 (${k})`
+          });
+        }
+      });
+    }
 
-    const stdKeys = ['A', 'B', 'C', 'D', 'E'];
+    const stdKeys = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
     const cTokens = parseMultiChoiceTokens(m.correctAnswer);
     if (
       !isMultiSelectQuiz &&
+      !isWordBankQuiz &&
       cTokens.length === 0 &&
       (!stdKeys.includes(m.correctAnswer.toUpperCase()) ||
         !stdKeys.includes(m.wrongAnswer.toUpperCase()))
@@ -5387,8 +6359,8 @@ function renderCurrentQuizQuestion() {
     }
 
     const displayLabels = useNumLabel
-      ? ['1', '2', '3', '4', '5']
-      : ['A', 'B', 'C', 'D', 'E'];
+      ? ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']
+      : ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
     optionsContainer.innerHTML = renderedOptions
       .map((opt, idx) => {
         const dispLetter = displayLabels[idx] || String(idx + 1);
