@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>錯題進化論｜互動式錯題釐清・PNG診斷卡・強化練習・試算表管理</title>
+  <title>英文錯題進化論｜單字・克漏字・文意選填・篇章結構・閱讀・翻譯 自主學習系統</title>
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -27,10 +27,10 @@
         <div class="brand-icon">📘</div>
         <div>
           <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;">
-            <span class="brand-title">錯題進化論 Mistake Mastery</span>
+            <span class="brand-title">英文錯題進化論 Mistake Mastery</span>
             <span class="author-credit-pill">✨ Made by Daphne Lin</span>
           </div>
-          <div class="brand-subtitle">試卷框選 × 自主學習引導 × 錯題診斷卡 × 強化再練習 × 試算表同步</div>
+          <div class="brand-subtitle">高中英文專屬｜單字選擇 × 克漏字 × 文意選填 × 篇章結構 × 閱讀測驗 × 翻譯</div>
         </div>
       </div>
 
@@ -212,136 +212,68 @@
             <form id="mistakeForm" onsubmit="return false;">
               <input type="hidden" id="editingMistakeId" value="" />
 
-              <!-- Step 1: 題目基本資訊與內容 -->
+              <!-- Step 1: 題目基本資訊與內容（英文科六大題型專屬） -->
               <div class="form-section">
                 <div class="section-badge-title" style="flex-wrap:wrap; gap:0.4rem;">
-                  <span>STEP 1｜選擇科目、題型 ＆ 題目內容</span>
-                  <span style="font-size:0.78rem; color:#64748b; font-weight:500;">版面與引導會隨科目自動切換</span>
+                  <span>STEP 1｜選擇英文題型 ＆ 題目內容</span>
+                  <span style="font-size:0.78rem; color:#4f46e5; font-weight:600;">🔤 高中英文六大必考題型專屬</span>
                 </div>
 
-                <!-- Quick Subject Selector Bar -->
-                <div class="form-group" style="margin-bottom:0.65rem;">
-                  <label class="form-label" style="margin-bottom:0.3rem;">📚 快速切換科目（點選後自動切換專屬介面與三階段引導）</label>
-                  <div class="subject-quick-pills" id="subjectQuickPills">
-                    <button type="button" class="subject-pill active" data-subj="英文">🔤 英文</button>
-                    <button type="button" class="subject-pill" data-subj="數學">📐 數學</button>
-                    <button type="button" class="subject-pill" data-subj="國文">📖 國文</button>
-                    <button type="button" class="subject-pill" data-subj="物理">⚡ 物理</button>
-                    <button type="button" class="subject-pill" data-subj="化學">🧪 化學</button>
-                    <button type="button" class="subject-pill" data-subj="生物">🧬 生物</button>
-                    <button type="button" class="subject-pill" data-subj="地理">🌍 地理</button>
-                    <button type="button" class="subject-pill" data-subj="歷史">🏛️ 歷史</button>
-                    <button type="button" class="subject-pill" data-subj="公民">⚖️ 公民</button>
+                <!-- Hidden Subject Input (Always English) -->
+                <input type="hidden" id="fieldSubject" value="英文" />
+
+                <!-- 6 Core English Question Types Switcher -->
+                <div class="form-group" style="margin-bottom:0.75rem;">
+                  <label class="form-label">🎯 本題英文題型（點選自動切換對應選項與三階段解題引導）</label>
+                  <div class="error-tags-grid" id="questionTypeContainer" style="margin-bottom:0;">
+                    <button type="button" class="diagnosis-tag selected" data-qtype="choice" id="qtypeBtnChoice">🔤 單字選擇／字彙</button>
+                    <button type="button" class="diagnosis-tag" data-qtype="cloze" id="qtypeBtnCloze">🧩 克漏字 (綜合測驗)</button>
+                    <button type="button" class="diagnosis-tag" data-qtype="wordbank" id="qtypeBtnWordBank">🔠 文意選填 (A~J)</button>
+                    <button type="button" class="diagnosis-tag" data-qtype="structure" id="qtypeBtnStructure">📑 篇章結構 (A~E/F)</button>
+                    <button type="button" class="diagnosis-tag" data-qtype="reading" id="qtypeBtnReading">📖 閱讀測驗</button>
+                    <button type="button" class="diagnosis-tag" data-qtype="translation" id="qtypeBtnTrans">✍️ 翻譯題 (中翻英)</button>
                   </div>
                 </div>
 
-                <div class="form-row" style="margin-bottom:0.75rem;">
-                  <div class="form-group">
-                    <label class="form-label">科目名稱</label>
-                    <input type="text" class="form-input" id="fieldSubject" list="subjectList" placeholder="例如：英文" value="英文" required />
-                    <datalist id="subjectList">
-                      <option value="英文"></option>
-                      <option value="國文"></option>
-                      <option value="數學"></option>
-                      <option value="物理"></option>
-                      <option value="化學"></option>
-                      <option value="生物"></option>
-                      <option value="地球科學"></option>
-                      <option value="自然科學"></option>
-                      <option value="地理"></option>
-                      <option value="歷史"></option>
-                      <option value="公民"></option>
-                    </datalist>
-                  </div>
-
+                <div class="form-row" style="grid-template-columns: 1fr 120px; margin-bottom:0.75rem;">
                   <div class="form-group">
                     <label class="form-label">試卷名稱 / 單元</label>
-                    <input type="text" class="form-input" id="fieldUnit" placeholder="例如：U7 單字與克漏字" value="段考複習卷" />
+                    <input type="text" class="form-input" id="fieldUnit" placeholder="例如：英文1進階卷_U15 或 第一次段考" value="英文段考複習卷" />
                   </div>
 
-                  <div class="form-group" style="max-width:110px;">
+                  <div class="form-group">
                     <label class="form-label">題號</label>
-                    <input type="text" class="form-input" id="fieldQuestionNum" placeholder="例如：1" required />
-                  </div>
-                </div>
-
-                <!-- Question Type Switcher (Labels adapt cleanly to Subject) -->
-                <div class="form-group" style="margin-bottom:0.75rem;">
-                  <label class="form-label">🎯 本題題型</label>
-                  <div class="error-tags-grid" id="questionTypeContainer" style="margin-bottom:0;">
-                    <button type="button" class="diagnosis-tag selected" data-qtype="choice" id="qtypeBtnChoice">🔘 單選題／克漏字</button>
-                    <button type="button" class="diagnosis-tag" data-qtype="wordbank" id="qtypeBtnWordBank">🔠 文意選填 (A~J 十選十)</button>
-                    <button type="button" class="diagnosis-tag" data-qtype="multiselect" id="qtypeBtnMulti">☑️ 多選題</button>
-                    <button type="button" class="diagnosis-tag" data-qtype="fill" id="qtypeBtnFill">🔤 文意字彙／填充題</button>
-                    <button type="button" class="diagnosis-tag" data-qtype="translation" id="qtypeBtnTrans">✍️ 翻譯／手寫非選題</button>
-                    <button type="button" class="diagnosis-tag" data-qtype="reading" id="qtypeBtnReading">📖 閱讀測驗／題組</button>
+                    <input type="text" class="form-input" id="fieldQuestionNum" placeholder="例如：36" required />
                   </div>
                 </div>
 
                 <!-- Cropped Question Image Preview -->
                 <div id="cropPreviewArea" class="crop-preview-container" style="display:none;">
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.35rem; flex-wrap:wrap; gap:0.35rem;">
-                    <span style="font-size:0.8rem; font-weight:700; color:#4f46e5;">📸 已擷取試卷截圖（支援自動 OCR 題目辨識）</span>
+                    <span style="font-size:0.8rem; font-weight:700; color:#4f46e5;">📸 已擷取試卷截圖（支援自動擷取題幹與選項）</span>
                     <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
-                      <button type="button" class="btn btn-secondary btn-sm" id="btnRerunOcrOnCrop" title="重新辨識截圖中的題目文字">🔍 重新辨識題目</button>
-                      <button type="button" class="btn btn-secondary btn-sm" id="btnOcrLeftPrintOnly" style="display:none;" title="若考卷右側有手寫計算或附圖干擾，點此只辨識左半部印刷題幹與選項">✂️ 濾除右側手寫算式重讀</button>
+                      <button type="button" class="btn btn-secondary btn-sm" id="btnRerunOcrOnCrop" title="重新辨識截圖中的英文題目文字">🔍 重新辨識題目</button>
                       <button type="button" class="btn btn-danger-outline btn-sm" id="btnRemoveCropImg">移除截圖</button>
                     </div>
                   </div>
                   <img id="cropPreviewImg" src="" alt="題目截圖預覽" />
                   <div id="ocrStatusBar" style="display:none; margin-top:0.45rem; padding:0.45rem 0.7rem; background:#eef2ff; border:1px solid #c7d2fe; border-radius:6px; font-size:0.8rem; color:#312e81; font-weight:600;">
-                    🔍 正在從截圖自動辨識題目文字...
+                    🔍 正在從截圖自動辨識英文題目文字...
                   </div>
                 </div>
 
-                <!-- If multiple questions were detected in crop region, let student pick one -->
+                <!-- If multiple questions / blanks were detected in crop region, let student pick one -->
                 <div id="multiQuestionSelectorBar" style="display:none; background:#eef2ff; border:1px solid #c7d2fe; border-radius:8px; padding:0.55rem 0.8rem; margin-bottom:0.75rem; font-size:0.84rem;">
-                  <strong style="color:#312e81;">🎯 框選範圍內偵測到多題，請點選你要記錄哪一題：</strong>
+                  <strong style="color:#312e81;">🎯 偵測到多題／多空格題組，點選題號即可切換該題前後文與正解：</strong>
                   <div id="multiQuestionButtons" style="display:flex; gap:0.4rem; flex-wrap:wrap; margin-top:0.4rem;"></div>
                 </div>
 
                 <div class="form-group">
                   <label class="form-label" style="flex-wrap:wrap; gap:0.35rem;">
-                    <span id="labelQuestionStem">題目敘述（在左側試卷框選題目會自動帶入，亦可直接輸入）</span>
-                    <button type="button" class="btn btn-secondary btn-sm" id="btnParseRawQuestion" title="自動整理題號與選項">✨ 自動整理題目格式</button>
+                    <span id="labelQuestionStem">英文題目敘述／文章空格前後文（左側框選會自動帶入，亦可直接貼上）</span>
+                    <button type="button" class="btn btn-secondary btn-sm" id="btnParseRawQuestion" title="自動整理題號與選項">✨ 自動拆解題幹與選項</button>
                   </label>
-
-                  <!-- Math & Science Quick Symbol Bar (Hidden automatically when subject is English / Humanities!) -->
-                  <div id="mathSymbolToolbar" style="display:none; flex-wrap:wrap; gap:0.25rem; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:0.3rem 0.5rem; margin-bottom:0.35rem;">
-                    <span style="font-size:0.74rem; color:#64748b; font-weight:600; margin-right:0.2rem;">🧮 符號快捷輸入：</span>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="lim(x→)" style="padding:0.12rem 0.42rem; font-size:0.78rem;">lim</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="√" style="padding:0.12rem 0.42rem; font-size:0.78rem;">√</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="²" style="padding:0.12rem 0.42rem; font-size:0.78rem;">x²</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="³" style="padding:0.12rem 0.42rem; font-size:0.78rem;">x³</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="|x|" style="padding:0.12rem 0.42rem; font-size:0.78rem;">|x|</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="[x]" style="padding:0.12rem 0.42rem; font-size:0.78rem;">[高斯]</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="∞" style="padding:0.12rem 0.42rem; font-size:0.78rem;">∞</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="α" style="padding:0.12rem 0.42rem; font-size:0.78rem;">α</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="β" style="padding:0.12rem 0.42rem; font-size:0.78rem;">β</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="θ" style="padding:0.12rem 0.42rem; font-size:0.78rem;">θ</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="π" style="padding:0.12rem 0.42rem; font-size:0.78rem;">π</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="∠" style="padding:0.12rem 0.42rem; font-size:0.78rem;">∠</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="△" style="padding:0.12rem 0.42rem; font-size:0.78rem;">△</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="°" style="padding:0.12rem 0.42rem; font-size:0.78rem;">°</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="±" style="padding:0.12rem 0.42rem; font-size:0.78rem;">±</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="×" style="padding:0.12rem 0.42rem; font-size:0.78rem;">×</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="/" style="padding:0.12rem 0.42rem; font-size:0.78rem;">a/b</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="→" style="padding:0.12rem 0.42rem; font-size:0.78rem;">→</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-sym-btn" data-sym="⇌" style="padding:0.12rem 0.42rem; font-size:0.78rem;">⇌</button>
-                  </div>
-
-                  <!-- 1-Click Math Concept / Topic Quick Selector (Only shown when Subject is 數學!) -->
-                  <div id="mathTopicQuickBar" style="display:none; flex-wrap:wrap; gap:0.3rem; align-items:center; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:0.35rem 0.55rem; margin-bottom:0.4rem;">
-                    <span style="font-size:0.75rem; color:#1e40af; font-weight:700;">📐 數學考點快選（相片有複雜分式免打字，點選即刻切換引導）：</span>
-                    <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="limit" style="padding:0.14rem 0.48rem; font-size:0.75rem;">📈 函數極限／分式／夾擠定理</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="trig" style="padding:0.14rem 0.48rem; font-size:0.75rem;">📐 三角函數／疊合／正餘弦</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="complex" style="padding:0.14rem 0.48rem; font-size:0.75rem;">🧭 複數平面／極式</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="vector" style="padding:0.14rem 0.48rem; font-size:0.75rem;">↗️ 平面與空間向量／內積</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="calculus" style="padding:0.14rem 0.48rem; font-size:0.75rem;">📉 微積分／導數切線／面積</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="algebra" style="padding:0.14rem 0.48rem; font-size:0.75rem;">📊 多項式／指對數／數列</button>
-                    <button type="button" class="btn btn-secondary btn-sm math-topic-chip" data-mtopic="prob" style="padding:0.14rem 0.48rem; font-size:0.75rem;">🎲 排列組合／機率</button>
-                  </div>
-                  <textarea class="form-textarea" id="fieldQuestionText" placeholder="在左側試卷框選題目會自動帶入，亦可直接貼上或輸入題目敘述..."></textarea>
+                  <textarea class="form-textarea" id="fieldQuestionText" placeholder="在左側試卷框選題目會自動帶入（支援單字、克漏字、文意選填、篇章結構、閱讀測驗、中翻英）..."></textarea>
                 </div>
 
                 <!-- Options A/B/C/D/(E) -->
@@ -526,15 +458,15 @@
                   </div>
                 </div>
 
-                <!-- Optional Error Tags (Filtered dynamically by Subject so English doesn't show Math tags!) -->
+                <!-- English-Specific Error Tags -->
                 <div class="form-group" style="margin-bottom:0.65rem;">
-                  <label class="form-label" style="font-size:0.8rem; color:#475569;">系統判定錯誤類型（點選可切換）：</label>
+                  <label class="form-label" style="font-size:0.8rem; color:#475569;">系統判定英文錯誤類型（點選可切換）：</label>
                   <div class="error-tags-grid" id="errorTagsContainer" style="margin-bottom:0.2rem;">
-                    <button type="button" class="diagnosis-tag" data-tag="文法與詞性判斷" id="errTagGrammar">🔤 文法／詞性／關代判斷錯誤</button>
-                    <button type="button" class="diagnosis-tag" data-tag="片語與字彙搭配" id="errTagVocab">📘 片語／單字語意搭配混淆</button>
-                    <button type="button" class="diagnosis-tag" data-tag="審題失誤" id="errTagReading">🔍 審題失誤（前後文線索漏看）</button>
-                    <button type="button" class="diagnosis-tag" data-tag="觀念混淆" id="errTagConcept">🧠 觀念混淆（相似定義搞混）</button>
-                    <button type="button" class="diagnosis-tag" data-tag="計算粗心" id="errTagCalc" style="display:none;">🔢 計算／正負號粗心</button>
+                    <button type="button" class="diagnosis-tag" data-tag="單字與片語搭配" id="errTagVocab">📘 單字語意／片語搭配混淆</button>
+                    <button type="button" class="diagnosis-tag" data-tag="文法與詞性判斷" id="errTagGrammar">🔤 文法句型／詞性／分詞關代錯誤</button>
+                    <button type="button" class="diagnosis-tag" data-tag="篇章結構與轉折" id="errTagStructure">📑 篇章結構轉折詞／代名詞漏看</button>
+                    <button type="button" class="diagnosis-tag" data-tag="閱讀定位與推論" id="errTagReading">📖 閱讀測驗細節定位／主旨推論失誤</button>
+                    <button type="button" class="diagnosis-tag" data-tag="翻譯句型與拼字" id="errTagTrans">✍️ 翻譯句型結構／時態／拼字失誤</button>
                   </div>
                 </div>
 
@@ -625,9 +557,9 @@
     <section class="tab-panel" id="tab-cards">
       <div class="cards-filter-bar">
         <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
-          <h2 style="font-size:1.15rem; font-weight:700;">🖼️ 我的錯題診斷卡總覽</h2>
-          <select class="form-select" id="filterCardSubject" style="width:auto; min-width:140px;">
-            <option value="ALL">全部科目</option>
+          <h2 style="font-size:1.15rem; font-weight:700;">🖼️ 我的英文錯題診斷卡總覽</h2>
+          <select class="form-select" id="filterCardSubject" style="width:auto; min-width:165px;">
+            <option value="ALL">全部英文題型</option>
           </select>
           <select class="form-select" id="filterCardStatus" style="width:auto; min-width:150px;">
             <option value="ALL">全部熟練狀態</option>
@@ -678,9 +610,9 @@
 
             <div class="form-row" style="margin-bottom:1.25rem;">
               <div class="form-group">
-                <label class="form-label">練習範圍篩選（科目）</label>
+                <label class="form-label">練習範圍篩選（英文題型）</label>
                 <select class="form-select" id="quizFilterSubject">
-                  <option value="ALL">全部科目</option>
+                  <option value="ALL">全部英文題型</option>
                 </select>
               </div>
               <div class="form-group">
@@ -759,10 +691,10 @@
             <div id="quizTextInputContainer" style="display:none; background:#ffffff; border:2px solid #cbd5e1; border-radius:12px; padding:1rem; margin-bottom:1.25rem;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem; flex-wrap:wrap; gap:0.4rem;">
                 <label class="form-label" id="quizTextInputLabel" style="font-size:0.95rem; color:#1e293b; margin:0;">
-                  ✍️ 請輸入你的答案（翻譯句子／單字填充／計算結果）：
+                  ✍️ 請輸入你的英文答案（中翻英句子／文意字彙單字）：
                 </label>
                 <button type="button" class="btn btn-secondary btn-sm" id="btnShowSkeletonHint">
-                  💡 提示骨架／首字母／單位
+                  💡 提示句型骨架／單字首尾字母
                 </button>
               </div>
               <div id="quizSkeletonHintText" style="display:none; font-size:0.86rem; color:#4f46e5; background:#eef2ff; padding:0.45rem 0.75rem; border-radius:6px; margin-bottom:0.55rem; font-family:monospace; font-weight:700;"></div>
@@ -902,7 +834,7 @@
   <!-- Global Persistent Footer (Appears on all tabs) -->
   <footer class="app-footer">
     <div class="app-footer-inner">
-      <span>📘 錯題進化論 Mistake Mastery — 互動式學生自主學習與錯題診斷系統</span>
+      <span>📘 英文錯題進化論 Mistake Mastery — 高中英文專屬自主學習與錯題診斷系統</span>
       <span class="footer-daphne-badge">✨ Made by Daphne Lin</span>
     </div>
   </footer>
@@ -961,7 +893,7 @@
             <div style="margin-top:auto; padding-top:0.5rem; display:flex; flex-direction:column; gap:0.65rem;">
               <div>
                 <label class="form-label" style="font-size:0.8rem;">新試算表名稱：</label>
-                <input type="text" class="form-input" id="inputNewSheetName" value="我的錯題進化本_2026" placeholder="例如：高一英文段考錯題本" />
+                <input type="text" class="form-input" id="inputNewSheetName" value="我的英文錯題進化本_2026" placeholder="例如：高一英文段考錯題本" />
               </div>
 
               <button type="button" class="btn btn-primary btn-lg" id="btnConfirmNewSheet" style="width:100%;">
