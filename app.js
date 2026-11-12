@@ -735,6 +735,7 @@ function setCropMode(enabled, modeType = 'question') {
   }
   if (overlay) {
     overlay.classList.toggle('active', state.cropMode);
+    overlay.style.touchAction = state.cropMode ? 'none' : 'auto';
   }
   if (banner) {
     banner.style.display = state.cropMode ? 'block' : 'none';
@@ -1049,26 +1050,42 @@ function initCropCanvasMouseEvents() {
   const overlay = document.getElementById('cropOverlayCanvas');
   const pdfCanvas = document.getElementById('pdfCanvas');
 
+  const getClientPoint = (evt) => {
+    if (evt.touches && evt.touches.length > 0) {
+      return { clientX: evt.touches[0].clientX, clientY: evt.touches[0].clientY };
+    }
+    if (evt.changedTouches && evt.changedTouches.length > 0) {
+      return { clientX: evt.changedTouches[0].clientX, clientY: evt.changedTouches[0].clientY };
+    }
+    return { clientX: evt.clientX, clientY: evt.clientY };
+  };
+
   const getCanvasCoords = (evt) => {
     const rect = overlay.getBoundingClientRect();
     const scaleX = overlay.width / rect.width;
     const scaleY = overlay.height / rect.height;
+    const pt = getClientPoint(evt);
     return {
-      x: (evt.clientX - rect.left) * scaleX,
-      y: (evt.clientY - rect.top) * scaleY
+      x: (pt.clientX - rect.left) * scaleX,
+      y: (pt.clientY - rect.top) * scaleY
     };
   };
 
-  overlay.addEventListener('mousedown', (evt) => {
+  const startCropDrag = (evt) => {
     if (!state.cropMode) return;
+    if (evt.cancelable) evt.preventDefault();
     state.isDraggingCrop = true;
     const pos = getCanvasCoords(evt);
     state.cropStartX = pos.x;
     state.cropStartY = pos.y;
-  });
+  };
 
-  overlay.addEventListener('mousemove', (evt) => {
+  overlay.addEventListener('mousedown', startCropDrag);
+  overlay.addEventListener('touchstart', startCropDrag, { passive: false });
+
+  const moveCropDrag = (evt) => {
     if (!state.cropMode || !state.isDraggingCrop) return;
+    if (evt.cancelable) evt.preventDefault();
     const pos = getCanvasCoords(evt);
     const ctx = overlay.getContext('2d');
     ctx.clearRect(0, 0, overlay.width, overlay.height);
@@ -1087,10 +1104,14 @@ function initCropCanvasMouseEvents() {
     ctx.lineWidth = 2.5;
     ctx.setLineDash([6, 4]);
     ctx.strokeRect(rx, ry, rw, rh);
-  });
+  };
+
+  overlay.addEventListener('mousemove', moveCropDrag);
+  overlay.addEventListener('touchmove', moveCropDrag, { passive: false });
 
   const finishCropSelection = async (evt) => {
     if (!state.cropMode || !state.isDraggingCrop) return;
+    if (evt.cancelable) evt.preventDefault();
     state.isDraggingCrop = false;
     const activeTarget = state.cropTarget || 'question';
     // Immediately exit crop mode BEFORE any async image stitching / PDF / OCR calls so the UI NEVER gets stuck!
@@ -1130,6 +1151,12 @@ function initCropCanvasMouseEvents() {
   };
 
   overlay.addEventListener('mouseup', finishCropSelection);
+  overlay.addEventListener('touchend', finishCropSelection, { passive: false });
+  overlay.addEventListener('touchcancel', () => {
+    state.isDraggingCrop = false;
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+  });
   window.addEventListener('mouseup', (evt) => {
     if (state.cropMode && state.isDraggingCrop) {
       finishCropSelection(evt);
