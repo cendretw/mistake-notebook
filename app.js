@@ -1215,6 +1215,7 @@ async function extractTextFromCropRegion(rx, ry, rw, rh, modeType = 'question') 
   }
 
   let joinedText = '';
+  let joinedLinesText = '';
   let fullPageText = '';
 
   if (docState.type === 'pdf' && docState.pdfDoc) {
@@ -1245,15 +1246,26 @@ async function extractTextFromCropRegion(rx, ry, rw, rh, modeType = 'question') 
             const itemW = Math.max((item.width || 8) * docState.scale, 8);
             const leftX = tx[4];
             const rightX = tx[4] + itemW;
-            const centerY = tx[5] - fontH * 0.35;
+            const baselineY = tx[5];
+            const glyphTop = baselineY - fontH * 0.85;
+            const glyphBottom = baselineY + fontH * 0.15;
+            const centerY = baselineY - fontH * 0.35;
 
             allPageItems.push({ x: leftX, y: centerY, str: item.str.trim() });
 
-            // Overlap check so wide items or small answer boxes like "36. J" are never missed!
-            const overlapsX = rightX >= rx - 6 && leftX <= rx + rw + 6;
-            const overlapsY = centerY >= ry - 6 && centerY <= ry + rh + 6;
+            // Require real glyph box overlap so adjacent lines/questions outside the crop do NOT bleed in
+            const yOverlap =
+              Math.min(glyphBottom, ry + rh) - Math.max(glyphTop, ry);
+            const minRequiredY = Math.min(fontH * 0.35, rh * 0.45);
+            const overlapsX = rightX >= rx - 2 && leftX <= rx + rw + 2;
+            const overlapsY = yOverlap >= minRequiredY;
             if (overlapsX && overlapsY) {
-              itemsInBox.push({ x: leftX, y: centerY, str: item.str.trim() });
+              itemsInBox.push({
+                x: leftX,
+                y: centerY,
+                h: fontH,
+                str: item.str.trim()
+              });
             }
           }
 
@@ -1263,11 +1275,28 @@ async function extractTextFromCropRegion(rx, ry, rw, rh, modeType = 'question') 
           allPageItems.sort((a, b) =>
             Math.abs(a.y - b.y) < 6 ? a.x - b.x : a.y - b.y
           );
-          joinedText = itemsInBox
-            .map((l) => l.str)
-            .join(' ')
-            .replace(/\s+/g, ' ')
-            .trim();
+
+          // Preserve line breaks between distinct rows so next-question boundaries stay clean
+          const lines = [];
+          let curLine = [];
+          let curY = null;
+          for (const it of itemsInBox) {
+            if (curY === null || Math.abs(it.y - curY) < Math.max(it.h * 0.55, 6)) {
+              curLine.push(it.str);
+              if (curY === null) curY = it.y;
+            } else {
+              lines.push(curLine.join(' '));
+              curLine = [it.str];
+              curY = it.y;
+            }
+          }
+          if (curLine.length) lines.push(curLine.join(' '));
+
+          joinedLinesText = lines
+            .map((l) => l.replace(/\s+/g, ' ').trim())
+            .filter(Boolean)
+            .join('\n');
+          joinedText = joinedLinesText.replace(/\n+/g, ' ').trim();
           fullPageText = allPageItems
             .map((l) => l.str)
             .join(' ')
@@ -1302,11 +1331,12 @@ async function extractTextFromCropRegion(rx, ry, rw, rh, modeType = 'question') 
       return;
     }
     if (
+      state.questionType !== 'choice' &&
       tryExtractMultiBlankFromTextAndPage(joinedText, fullPageText, modeType)
     ) {
       return;
     }
-    parseQuestionAndOptionsFromRawText(joinedText);
+    parseQuestionAndOptionsFromRawText(joinedLinesText || joinedText);
     updateSelfLearningCoach();
     runAutoMistakeDiagnosis();
     return;
@@ -2178,45 +2208,130 @@ async function recognizeTextAndMathFromCroppedImage(
 // - 篇章結構 A~E / A~F 句子選項 (structure)
 // - 閱讀測驗 (reading)
 // - 中翻英翻譯題 (translation)
+// When a crop/paste accidentally includes subsequent questions (e.g. Q4, Q5, Section II...),
+// isolate just the target single question so Q4+ never bleeds into stem or Option D.
+function isolateSingleQuestionText(rawText) {
+  const normalized = String(rawText || '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+  if (!normalized) return '';
+
+  const typedQNum = document.getElementById('fieldQuestionNum')?.value.trim();
+  const startMatch = normalized.match(
+    /(?:^|\n)\s*(?:[\(（\[]\s*[\)）\]]\s*)?(\d{1,3})\s*[\.、．\)]/
+  );
+  const firstNum = startMatch ? Number(startMatch[1]) : NaN;
+  const baseNum = !Number.isNaN(firstNum)
+    ? firstNum
+    : /^\d{1,3}$/.test(typedQNum || '')
+    ? Number(typedQNum)
+    : NaN;
+
+  // If user specifically entered a question number that starts slightly inside the text, jump to it
+  let text = normalized;
+  if (/^\d{1,3}$/.test(typedQNum || '') && Number(typedQNum) !== firstNum) {
+    const targetRe = new RegExp(
+      `(?:^|\\n|\\s)(?:[\\(（\\[]\\s*[\\)）\\]]\\s*)?${typedQNum}\\s*[\\.、．\\)]\\s`
+    );
+    const tm = targetRe.exec(normalized);
+    if (tm && tm.index >= 0) {
+      text = normalized.slice(tm.index).trim();
+    }
+  }
+
+  // Find where the next question or next exam section starts
+  const afterStartOffset = Math.min(text.length, 6);
+  const tail = text.slice(afterStartOffset);
+  const stopPositions = [];
+
+  // 1. Line-start next question number (e.g. "\n4. " or "\n( ) 4. ")
+  const lineNextQRe =
+    /\n\s*(?:[\(（\[]\s*[\)）\]]\s*)?(\d{1,3})\s*[\.、．\)]\s+/g;
+  let lm;
+  while ((lm = lineNextQRe.exec(tail)) !== null) {
+    const n = Number(lm[1]);
+    if (Number.isNaN(baseNum) || (n > baseNum && n <= baseNum + 15)) {
+      stopPositions.push(afterStartOffset + lm.index);
+      break;
+    }
+  }
+
+  // 2. Inline next question number right after options (e.g. "... (D) potential 4. The ..." or "... ( ) 4. ...")
+  if (!Number.isNaN(baseNum)) {
+    const inlineNextRe = new RegExp(
+      `\\s+(?:[\\(（\\[]\\s*[\\)）\\]]\\s*)?${baseNum + 1}\\s*[\\.、．\\)]\\s+(?=[A-Za-z\\u4e00-\\u9fa5_\\(（\\[])`
+    );
+    const im = inlineNextRe.exec(tail);
+    if (im) stopPositions.push(afterStartOffset + im.index);
+  }
+
+  // 3. Inline next section heading (II. / III. / IV. / V. / 第X大題 / Part)
+  const sectionRe =
+    /(?:^|\n|\s)(?:[IIVX]{2,4}\s*[\.、．]\s*(?:綜合測驗|克漏字|文意選填|篇章結構|閱讀測驗|翻譯|選擇)|第[一二三四五六]大題|Part\s+[IIVX\d]+\s*[:：\.])/i;
+  const sm = sectionRe.exec(tail);
+  if (sm) stopPositions.push(afterStartOffset + sm.index);
+
+  if (stopPositions.length > 0) {
+    const cutAt = Math.min(...stopPositions);
+    if (cutAt > 12) {
+      return text.slice(0, cutAt).trim();
+    }
+  }
+  return text;
+}
+
 function parseQuestionAndOptionsFromRawText(rawText) {
   const multiBar = document.getElementById('multiQuestionSelectorBar');
   const multiBtns = document.getElementById('multiQuestionButtons');
   if (multiBar) multiBar.style.display = 'none';
 
   if (!rawText || !rawText.trim()) return;
-  const cleaned = rawText.replace(/\s+/g, ' ').trim();
+  const prevQType = state.questionType || 'choice';
+  const linePreserved = String(rawText).replace(/\r\n?/g, '\n').trim();
+  const cleaned = linePreserved.replace(/\s+/g, ' ').trim();
   document.getElementById('fieldSubject').value = '英文';
 
-  // 0. Check if text contains a Word Bank (A)~(J)
-  const detectedBank = parseWordBankFromText(cleaned);
-  if (detectedBank) {
-    populateWordBankFields(detectedBank);
-    setQuestionTypeUI('wordbank');
-    const blankMap = extractSentencesByBlankNumbers(cleaned);
-    const blankNums = Object.keys(blankMap).sort((a, b) => Number(a) - Number(b));
-    if (blankNums.length > 0) {
-      applyMultiBlankQuestionItem(
-        {
-          unit: document.getElementById('fieldUnit')?.value || '英文段考複習卷',
-          wordBank: detectedBank,
-          blanks: blankMap
-        },
-        blankNums[0]
-      );
-      return;
+  // 0. Check if text contains a Word Bank (A)~(J) (only when user isn't explicitly on single choice, or there are actually >= 6 bank words A~J)
+  if (prevQType !== 'choice') {
+    const detectedBank = parseWordBankFromText(cleaned);
+    if (detectedBank) {
+      populateWordBankFields(detectedBank);
+      setQuestionTypeUI('wordbank');
+      const blankMap = extractSentencesByBlankNumbers(cleaned);
+      const blankNums = Object.keys(blankMap).sort((a, b) => Number(a) - Number(b));
+      if (blankNums.length > 0) {
+        applyMultiBlankQuestionItem(
+          {
+            unit: document.getElementById('fieldUnit')?.value || '英文段考複習卷',
+            wordBank: detectedBank,
+            blanks: blankMap
+          },
+          blankNums[0]
+        );
+        return;
+      }
     }
   }
 
-  // 1. Check if the cropped region contains multiple Cloze option rows like "( ) 19. (A)... ( ) 20. (A)..."
+  // For single-question types (單字選擇 / 閱讀 / 翻譯), isolate ONLY the target question so Q4+ never leaks in!
+  const shouldIsolateSingle =
+    prevQType === 'choice' || prevQType === 'reading' || prevQType === 'translation';
+  const workingLineText = shouldIsolateSingle
+    ? isolateSingleQuestionText(linePreserved)
+    : linePreserved;
+  const workingFlat = workingLineText.replace(/\s+/g, ' ').trim();
+
+  // 1. Parse numbered question(s) with (A)-(D) options (supports single vocabulary Q OR multiple cloze rows)
   const multiQRegex =
-    /(?:[\(（\[]\s*[\)）\]]\s*)?(\d{1,3})\s*[\.、．\)]\s*([^]*?[\(（\[][A-Da-d][\)）\]\.、\s][^]*?)(?=(?:[\(（\[]\s*[\)）\]]\s*)?\d{1,3}\s*[\.、．\)]\s*[^]*?[\(（\[][A-Da-d][\)）\]\.、\s]|$)/g;
+    /(?:[\(（\[]\s*[\)）\]]\s*)?(\d{1,3})\s*[\.、．\)]\s*([^]*?[\(（\[][A-Da-d][\)）\]\.、\s][^]*?)(?=(?:[\(（\[]\s*[\)）\]]\s*)?\d{1,3}\s*[\.、．\)]\s*[^]*?(?:[\(（\[][A-Da-d][\)）\]\.、\s]|$)|$)/g;
 
   const detectedQuestions = [];
   let m;
-  while ((m = multiQRegex.exec(cleaned)) !== null) {
+  while ((m = multiQRegex.exec(workingFlat)) !== null) {
     const qNum = m[1];
     const body = m[2].trim();
-    const parsedOpts = splitStemAndFourOptions(body);
+    const parsedOpts = splitStemAndFourOptions(body, Number(qNum));
     if (parsedOpts) {
       detectedQuestions.push({
         qNum,
@@ -2229,6 +2344,7 @@ function parseQuestionAndOptionsFromRawText(rawText) {
         optF: parsedOpts.optF || ''
       });
     }
+    if (shouldIsolateSingle && detectedQuestions.length >= 1) break;
   }
 
   if (detectedQuestions.length > 0) {
@@ -2244,15 +2360,17 @@ function parseQuestionAndOptionsFromRawText(rawText) {
         firstQ.stem
       );
 
-    setQuestionTypeUI(
-      isStructureOpts
-        ? 'structure'
-        : isReadingQ
-        ? 'reading'
-        : isClozeRow || detectedQuestions.length > 1
-        ? 'cloze'
-        : 'choice'
-    );
+    const nextQType = isStructureOpts
+      ? 'structure'
+      : isReadingQ
+      ? 'reading'
+      : prevQType === 'choice' && !isClozeRow
+      ? 'choice'
+      : isClozeRow || detectedQuestions.length > 1
+      ? 'cloze'
+      : 'choice';
+
+    setQuestionTypeUI(nextQType);
     applyParsedQuestionObject(firstQ);
 
     if (detectedQuestions.length > 1 && multiBar && multiBtns) {
@@ -2283,7 +2401,7 @@ function parseQuestionAndOptionsFromRawText(rawText) {
       });
 
       showToast(
-        `✂️ 框選範圍內偵測到 ${detectedQuestions.length} 題克漏字／選擇題（第 ${detectedQuestions
+        `✂️ 框選範圍內偵測到 ${detectedQuestions.length} 題（第 ${detectedQuestions
           .map((d) => d.qNum)
           .join('、')} 題），點選按鈕即可切換！`
       );
@@ -2296,16 +2414,23 @@ function parseQuestionAndOptionsFromRawText(rawText) {
   }
 
   // 2. Fallback: Single question or Discourse Structure (A)~(E)/(F) options
-  const singleParsed = splitStemAndFourOptions(cleaned);
+  const singleText =
+    prevQType === 'structure' ? cleaned : isolateSingleQuestionText(linePreserved).replace(/\s+/g, ' ').trim();
+  const singleNumM = singleText.match(/^\s*[\(（\[]?\s*(\d{1,3})\s*[\)）\]\.、．\s]/);
+  const singleParsed = splitStemAndFourOptions(
+    singleText,
+    singleNumM ? Number(singleNumM[1]) : NaN
+  );
   if (singleParsed) {
     const isStructureLike =
+      prevQType === 'structure' ||
       Boolean(singleParsed.optE || singleParsed.optF) ||
       [singleParsed.optA, singleParsed.optB, singleParsed.optC, singleParsed.optD].every(
         (s) => (s || '').split(/\s+/).length >= 6
       );
     const isReadingLike =
       !isStructureLike &&
-      ((singleParsed.stem && singleParsed.stem.length > 160) ||
+      ((singleParsed.stem && singleParsed.stem.length > 180) ||
         /according to|passage|article|infer|main idea|title|paragraph|which of the following/i.test(
           singleParsed.stem
         ));
@@ -2314,6 +2439,8 @@ function parseQuestionAndOptionsFromRawText(rawText) {
         ? 'structure'
         : isReadingLike
         ? 'reading'
+        : prevQType === 'cloze'
+        ? 'cloze'
         : 'choice'
     );
     if (singleParsed.stem) {
@@ -2340,35 +2467,50 @@ function parseQuestionAndOptionsFromRawText(rawText) {
         : '✂️ 已自動拆解英文題幹與 (A)~(D) 選項！'
     );
   } else {
-    document.getElementById('fieldQuestionText').value = cleaned;
+    document.getElementById('fieldQuestionText').value = singleText;
     ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].forEach((k) => {
       const el = document.getElementById(`fieldOpt${k}`);
       if (el) el.value = '';
     });
 
-    const qNumMatch = cleaned.match(/^\s*[\(（\[]?(\d{1,3})[\)）\]\.、．\s]/);
+    const qNumMatch = singleText.match(/^\s*[\(（\[]?(\d{1,3})[\)）\]\.、．\s]/);
     if (qNumMatch) {
       document.getElementById('fieldQuestionNum').value = qNumMatch[1];
       autoFillAnswerFromKeyMap(qNumMatch[1]);
     }
 
     // If it contains Chinese characters (like a Chinese prompt for translation), switch to translation!
-    const hasChineseSentence = (cleaned.match(/[\u4e00-\u9fa5]/g) || []).length >= 5;
+    const hasChineseSentence = (singleText.match(/[\u4e00-\u9fa5]/g) || []).length >= 5;
     if (hasChineseSentence) {
       setQuestionTypeUI('translation');
       showToast('✍️ 偵測到中文翻譯題幹，已自動切換為「翻譯題 (中翻英)」模式！');
     } else {
-      setQuestionTypeUI('choice');
+      setQuestionTypeUI(prevQType === 'cloze' ? 'cloze' : 'choice');
       showToast('🔤 已帶入英文題幹敘述！');
     }
   }
 }
 
-function splitStemAndFourOptions(text) {
-  const cleanOpt = (s) =>
-    String(s || '')
-      .replace(/[\(（\[]\s*[\)）\]]\s*\d{1,3}\s*[\.、．].*$/, '')
+function splitStemAndFourOptions(text, currentQNum = NaN) {
+  const cleanOpt = (s) => {
+    let out = String(s || '')
+      .replace(/\s*[\(（\[]\s*[\)）\]]\s*\d{1,3}\s*[\.、．\)][\s\S]*$/, '')
+      .replace(/\s+(?:[IIVX]{2,4}\s*[\.、．]\s*(?:綜合測驗|克漏字|文意選填|篇章結構|閱讀測驗|翻譯)|第[一二三四五六]大題|Part\s+[IIVX\d]+\s*[:：\.])[\s\S]*$/i, '')
       .trim();
+    if (!Number.isNaN(currentQNum)) {
+      out = out
+        .replace(
+          new RegExp(`\\s+${currentQNum + 1}\\s*[\\.、．\\)]\\s+(?=[A-Za-z\\u4e00-\\u9fa5_\\(（\\[])[\\s\\S]*$`),
+          ''
+        )
+        .trim();
+    } else {
+      out = out
+        .replace(/\s+\d{1,2}\s*[\.、．\)]\s+(?=[A-Z\u4e00-\u9fa5_\(（\[])[\s\S]*$/, '')
+        .trim();
+    }
+    return out;
+  };
 
   // 1. Try 6-option format (Discourse Structure A~F): (A) ... (B) ... (C) ... (D) ... (E) ... (F) ...
   const opt6LetterRegex =
@@ -2413,6 +2555,22 @@ function splitStemAndFourOptions(text) {
       optB: cleanOpt(m4L[3]),
       optC: cleanOpt(m4L[4]),
       optD: cleanOpt(m4L[5]),
+      optE: '',
+      optF: ''
+    };
+  }
+
+  // 4. Try "A. ... B. ... C. ... D. ..." or "A) ... B) ... C) ... D) ..." format
+  const opt4DotRegex =
+    /^(.*?)\s+A[\.\)]\s+(.+?)\s+B[\.\)]\s+(.+?)\s+C[\.\)]\s+(.+?)\s+D[\.\)]\s+(.+)$/;
+  const m4D = text.match(opt4DotRegex);
+  if (m4D) {
+    return {
+      stem: m4D[1].replace(/^[\(（\[]\s*[\)）\]]\s*/, '').trim(),
+      optA: cleanOpt(m4D[2]),
+      optB: cleanOpt(m4D[3]),
+      optC: cleanOpt(m4D[4]),
+      optD: cleanOpt(m4D[5]),
       optE: '',
       optF: ''
     };
